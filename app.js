@@ -455,7 +455,7 @@
     const geom = CadProject.geometry(record);
     geom.computeBoundingBox();
     if (geom.boundingBox.isEmpty()) { geom.dispose(); throw new Error(L("Operação sem volume", "Operation has no volume")); }
-    const mat = new THREE.MeshStandardMaterial({color: record.color, roughness: 0.36, metalness: 0.18, clippingPlanes: [slicePlane], side: THREE.DoubleSide});
+    const mat = new THREE.MeshStandardMaterial({color: record.color, roughness: 0.36, metalness: 0.18, flatShading: isMesh, clippingPlanes: [slicePlane], side: THREE.DoubleSide});
     const mesh = new THREE.Mesh(geom, mat);
     mesh.castShadow = mesh.receiveShadow = true;
     mesh.position.fromArray(record.pos);
@@ -852,7 +852,7 @@
       if(!data.triangles.length||Math.abs(CadMesh.signedVolume(data.vertices,data.triangles))<1e-6)throw new Error(L('A operação não produz volume. A cena foi preservada.', 'The operation produces no volume. The scene was preserved.'));
       const geometry=CadMesh.toGeometry(data);result.geometry.dispose();result.geometry=geometry;
       const center=new THREE.Vector3();geometry.boundingBox.getCenter(center);geometry.translate(-center.x,-center.y,-center.z);result.position.copy(center);
-      result.castShadow=result.receiveShadow=true;
+      result.castShadow=result.receiveShadow=true;result.material.flatShading=true;result.material.needsUpdate=true;
       result.userData={id:newId('csg'),type:'CSG_SOLID',name:name.slice(0,160),color:base.userData.color,params:{},isParametric:false};
       attachCadEdges(result);applyVisualStyleToMesh(result);
     } catch(error){disposeMesh(result);throw error;}

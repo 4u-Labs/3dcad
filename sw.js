@@ -1,6 +1,6 @@
 /* Caches are shared by origin: this worker owns only this prefix and scope. */
 const CACHE_PREFIX = '3dcad-studio-';
-const CACHE_NAME = `${CACHE_PREFIX}v1.2.0-r3`;
+const CACHE_NAME = `${CACHE_PREFIX}v1.2.0-r4`;
 const ASSETS = ['./','./index.html','./style.css','./cad_mesh.js','./cad_generators.js','./cad_project.js','./ui_text.js','./app.js','./manifest.json','./icon-192.png','./icon-512.png','./icon-maskable-512.png','./icon.webp','./favicon-32x32.png','./favicon.ico','./libs/three.min.js','./libs/OrbitControls.js','./libs/STLExporter.js','./libs/STLLoader.js','./libs/three-csg.js'];
 const scope = self.registration.scope;
 const ownedAssets = new Set(ASSETS.map(asset=>new URL(asset,scope).href));
