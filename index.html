@@ -8,7 +8,7 @@
       name="description"
       content="Estúdio CAD 3D paramétrico open-source no navegador: Sketch 2D, Extrusão, Engrenagens, Suportes, CSG Booleano, Análise de Impressão 3D, Comandos Locais e exportação STL, 3MF, STEP e OBJ."
     />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
     <meta name="theme-color" content="#0d1118" />
     <link rel="canonical" href="https://4u.ia.br/app/3dcad/" />
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
@@ -58,7 +58,7 @@
           <div class="brand-title">
             <strong>
               <span>3DCad Studio</span>
-              <span class="badge-rust">Mesh CAD · Local</span>
+              <span class="badge-rust">BRep &amp; Malhas · Dual CAD</span>
             </strong>
             <small data-i18n="subtitle">Modelagem 3D &amp; Impressão 3D · 4u-Labs</small>
           </div>
@@ -234,6 +234,37 @@
           <span class="ribbon-label" data-i18n="grpPattern">Padrão &amp; Cópia</span>
         </div>
 
+        <!-- Operações BRep (OpenCASCADE) & Superfícies Exatas -->
+        <div class="ribbon-group">
+          <div class="ribbon-btns">
+            <button type="button" class="tool-btn cyan-accent" id="btnRevolve" title="Revolução de perfil ou sólido">
+              <span class="ico">↻</span>
+              <span class="lbl" data-i18n="rbRevolve">Revolução</span>
+            </button>
+            <button type="button" class="tool-btn cyan-accent" id="btnLoft" title="Loft entre perfis e seções">
+              <span class="ico">⏳</span>
+              <span class="lbl" data-i18n="rbLoft">Loft</span>
+            </button>
+            <button type="button" class="tool-btn cyan-accent" id="btnSweep" title="Varredura de perfil ao longo de espinha">
+              <span class="ico">〰️</span>
+              <span class="lbl" data-i18n="rbSweep">Varredura</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnFilletBRep" title="Arredondar arestas (Fillet analítico)">
+              <span class="ico">⌒</span>
+              <span class="lbl" data-i18n="rbFilletBRep">Arredondar</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnChamferBRep" title="Chanfrar arestas (Chamfer analítico)">
+              <span class="ico">⊿</span>
+              <span class="lbl" data-i18n="rbChamferBRep">Chanfro</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnShellBRep" title="Criar casca oca (Shell BRep)">
+              <span class="ico">🕳️</span>
+              <span class="lbl" data-i18n="rbShellBRep">Casca</span>
+            </button>
+          </div>
+          <span class="ribbon-label" data-i18n="grpBRep">BRep &amp; Exato</span>
+        </div>
+
         <!-- Exportação Multi-Formato -->
         <div class="ribbon-group">
           <div class="ribbon-btns">
@@ -241,9 +272,13 @@
               <span class="ico">🖨</span>
               <span class="lbl">.3MF</span>
             </button>
-            <button type="button" class="tool-btn cyan-accent" id="btnExportStep">
+            <button type="button" class="tool-btn cyan-accent" id="btnExportStepExact" title="Exportar sólido analítico BRep STEP">
               <span class="ico">📐</span>
-              <span class="lbl">.STEP</span>
+              <span class="lbl">.STEP BRep</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnExportStep" title="Exportar malha facetada STEP">
+              <span class="ico">📐</span>
+              <span class="lbl">.STEP Malha</span>
             </button>
             <button type="button" class="tool-btn" id="btnExportObj">
               <span class="ico">📦</span>
@@ -424,10 +459,33 @@
                 <button type="button" class="hdr-btn primary" id="btnFinishSketch">
                   ✓ <span data-i18n="skExtrudeBtn">Extrudar para 3D</span>
                 </button>
+                <button type="button" class="hdr-btn cyan-accent" id="btnFinishSketchRevolve" title="Revolução completa em torno do eixo Y/Z">
+                  ↻ <span data-i18n="skRevolveBtn">Revolver 360°</span>
+                </button>
                 <button type="button" class="hdr-btn" id="btnCancelSketch">
                   × <span data-i18n="skCancel">Fechar</span>
                 </button>
               </div>
+            </div>
+            <!-- Sketch Constraints Bar -->
+            <div class="sketch-constraint-bar">
+              <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin-right: 4px;" data-i18n="skConstraintsTitle">Restrições Geométricas:</span>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintH" title="Restrição Horizontal">— <span data-i18n="cHoriz">Horizontal</span></button>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintV" title="Restrição Vertical">| <span data-i18n="cVert">Vertical</span></button>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintCoinc" title="Restrição Coincidente">⚯ <span data-i18n="cCoinc">Coincidente</span></button>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintDist" title="Restrição de Distância">↔ <span data-i18n="cDist">Distância</span></button>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintTan" title="Restrição Tangente">⌒ <span data-i18n="cTan">Tangente</span></button>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintPerp" title="Restrição Perpendicular">⊥ <span data-i18n="cPerp">Perpendicular</span></button>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintPar" title="Restrição Paralela">∥ <span data-i18n="cPar">Paralela</span></button>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintEq" title="Restrição de Igualdade">= <span data-i18n="cEq">Igual</span></button>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintConc" title="Restrição Concêntrica">◎ <span data-i18n="cConc">Concêntrica</span></button>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintFix" title="Fixar Posição">⚓ <span data-i18n="cFix">Fixar</span></button>
+              <button type="button" class="sketch-constraint-btn" id="btnSkConstraintAngle" title="Restrição Angular">∠ <span data-i18n="cAngle">Ângulo</span></button>
+              <div style="flex: 1"></div>
+              <button type="button" class="sketch-constraint-btn" id="btnSolveSketchConstraints" style="background: rgba(56, 189, 248, 0.2); border-color: var(--accent-cyan); color: #fff;">
+                ⚡ <span data-i18n="cSolve">Resolver Restrições</span>
+              </button>
+              <span id="skDofBadge" class="dof-badge under" title="Graus de Liberdade (Degrees of Freedom)">DOF: 0</span>
             </div>
             <details class="sketch-properties"><summary data-i18n="sketchDimensions">Cotas numéricas do esboço</summary><div id="sketchEntityFields"></div></details>
             <div class="sketch-canvas-wrap">
@@ -464,6 +522,9 @@
             </button>
             <button type="button" class="insp-tab" data-insp-tab="print" data-i18n="tabPrint">
               🖨️ Impressão 3D
+            </button>
+            <button type="button" class="insp-tab" data-insp-tab="assembly" data-i18n="tabAssembly">
+              🔗 Montagem
             </button>
             <button type="button" class="insp-tab" data-insp-tab="ai" data-i18n="tabAi">
               ⌘ Comandos
@@ -703,7 +764,83 @@
             </div>
           </div>
 
-          <!-- TAB 3: AI COPILOT & MCP SERVER CONSOLE -->
+          <!-- TAB 3: ASSEMBLY & KINEMATIC JOINTS -->
+          <div class="insp-pane" id="paneAssembly" hidden>
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="assemblyTitle">Montagem &amp; Juntas Cinemáticas</span>
+                <span id="assemblyJointsCount" class="tree-type-tag">0 juntas</span>
+              </div>
+              <p class="feature-note" data-i18n="assemblyNote">
+                Conecte peças por juntas de Rotação (Revolute), Translação (Slider), Fixas ou Esféricas (Ball) com limites de movimento e cinemática direta.
+              </p>
+              <div class="field-row">
+                <label for="jointNameInput" data-i18n="lblJointName">Nome da Junta</label>
+                <input type="text" id="jointNameInput" class="txt-input" placeholder="Junta_1" />
+              </div>
+              <div class="field-row">
+                <label for="jointBodyASelect" data-i18n="lblBodyA">Corpo Base (Pai)</label>
+                <select id="jointBodyASelect" class="txt-input"></select>
+              </div>
+              <div class="field-row">
+                <label for="jointBodyBSelect" data-i18n="lblBodyB">Corpo Articulado (Filho)</label>
+                <select id="jointBodyBSelect" class="txt-input"></select>
+              </div>
+              <div class="field-row">
+                <label for="jointTypeSelect" data-i18n="lblJointType">Tipo de Articulação</label>
+                <select id="jointTypeSelect" class="txt-input">
+                  <option value="revolute">Revolute (Rotação)</option>
+                  <option value="slider">Slider (Translação Linear)</option>
+                  <option value="fixed">Fixed (Rígida / Fixa)</option>
+                  <option value="ball">Ball (Esférica / 3 Eixos)</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label for="jointAxisSelect" data-i18n="lblJointAxis">Eixo de Movimento</label>
+                <select id="jointAxisSelect" class="txt-input">
+                  <option value="Z">Eixo Z (0, 0, 1)</option>
+                  <option value="Y">Eixo Y (0, 1, 0)</option>
+                  <option value="X">Eixo X (1, 0, 0)</option>
+                </select>
+              </div>
+              <div class="xyz-grid" style="margin-top: 4px">
+                <div class="xyz-box">
+                  <span class="x-lbl" data-i18n="lblLimitMin">Limite Mín</span>
+                  <input type="number" id="jointLimitMin" class="num-input" value="-180" step="5" />
+                </div>
+                <div class="xyz-box">
+                  <span class="y-lbl" data-i18n="lblLimitMax">Limite Máx</span>
+                  <input type="number" id="jointLimitMax" class="num-input" value="180" step="5" />
+                </div>
+              </div>
+              <button type="button" class="action-btn" id="btnAddJoint" style="margin-top: 6px">
+                ＋ <span data-i18n="btnAddJoint">Adicionar Junta</span>
+              </button>
+            </div>
+
+            <!-- Interactive Joint Simulation -->
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="simTitle">Simulação de Movimento</span>
+                <span id="jointSimulateVal" class="tree-type-tag">0°</span>
+              </div>
+              <div class="field-row" style="flex-direction: column; align-items: stretch; gap: 4px">
+                <label for="rangeJointSimulate" data-i18n="lblSimSlider">Controle Interativo da Junta:</label>
+                <input type="range" id="rangeJointSimulate" min="-180" max="180" value="0" class="num-input" style="width: 100%" />
+              </div>
+              <div class="btn-row" style="margin-top: 6px">
+                <button type="button" class="action-btn" id="btnAnimateJoints">
+                  ▶ <span data-i18n="btnAnimate">Animar Cinemática</span>
+                </button>
+                <button type="button" class="action-btn" id="btnResetAssembly">
+                  ↺ <span data-i18n="btnReset">Posição Inicial</span>
+                </button>
+              </div>
+              <div id="assemblyJointsList" style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px"></div>
+            </div>
+          </div>
+
+          <!-- TAB 4: AI COPILOT & MCP SERVER CONSOLE -->
           <div class="insp-pane" id="paneAi" hidden>
             <p class="feature-note" data-i18n="commandNote">Comandos locais por regras, sem IA generativa ou servidor MCP. Confira a ação antes de aplicar.</p>
             <div class="prop-card">
@@ -899,6 +1036,11 @@
     <script src="libs/STLExporter.js"></script>
     <script src="libs/STLLoader.js"></script>
     <script src="libs/three-csg.js"></script>
+    <script src="libs/replicad.global.js"></script>
+    <script src="cad_sketch_solver.js"></script>
+    <script src="cad_exact_engine.js"></script>
+    <script src="cad_assembly.js"></script>
+    <script src="cad_kernel.js"></script>
     <script src="cad_mesh.js"></script>
     <script src="cad_generators.js"></script>
     <script src="cad_project.js"></script>

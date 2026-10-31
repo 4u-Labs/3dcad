@@ -707,6 +707,7 @@ textarea {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-subtle);
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .sketch-tools {
@@ -1213,6 +1214,92 @@ input, textarea { user-select: text; }
 .sketch-canvas-wrap { min-height: 140px; }
 #sketch2dCanvas { touch-action: none; }
 .boot-overlay { position: fixed; inset: 0; display: grid; place-items: center; background: #0d1118; z-index: 300; color: var(--accent-cyan); }
+.sketch-constraint-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  background: var(--bg-ribbon);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+.sketch-constraint-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+.sketch-constraint-btn:hover {
+  border-color: var(--accent-cyan);
+  background: rgba(56, 189, 248, 0.12);
+}
+.sketch-constraint-btn.active {
+  background: var(--accent-cyan);
+  color: #0b0e14;
+  border-color: var(--accent-cyan);
+}
+.dof-badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+}
+.dof-badge.under {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+.dof-badge.fully {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.dof-badge.over {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+.joint-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.joint-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.joint-title {
+  font-weight: 600;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.joint-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
 @media (max-width: 1280px) and (min-width: 781px) {
   .studio-body { grid-template-columns: 190px minmax(0,1fr) 290px; }
   .viewport-telemetry { max-width: calc(100% - 110px); left: 6px; }

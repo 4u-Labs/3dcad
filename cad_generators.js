@@ -1227,4 +1227,5 @@
     exportMeshesToSTEP,
     parseCadPrompt,
   };
+  if (typeof module !== "undefined" && module.exports) module.exports = root.CadGenerators;
 })(typeof window !== "undefined" ? window : globalThis);

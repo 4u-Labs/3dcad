@@ -126,4 +126,5 @@
     };
   }
   root.CadProject={FORMAT,VERSION,MAX_BYTES,MAX_SOLIDS,validateParams,validateItems,document,read,serialize,geometry,createStore};
+  if (typeof module !== "undefined" && module.exports) module.exports = root.CadProject;
 })(typeof window!=='undefined'?window:globalThis);

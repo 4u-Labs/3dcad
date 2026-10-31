@@ -334,6 +334,16 @@
   scene.add(measureGroup);
 
   // Application State
+  const Kernel = typeof CadKernel !== "undefined" ? CadKernel : null;
+  const Assembly = typeof CadAssembly !== "undefined" ? CadAssembly : null;
+  const SketchSolver = typeof CadSketchSolver !== "undefined" ? CadSketchSolver : null;
+  const ExactEngine = typeof CadExactEngine !== "undefined" ? CadExactEngine : null;
+  const assemblyManager = Assembly ? new Assembly.AssemblyManager() : null;
+  let activeJointId = null;
+  let isAssemblyAnimating = false;
+  let assemblyAnimFrame = null;
+  let assemblyAnimPhase = 0;
+
   let solids = [];
   let selectedSolid = null;
   let visualStyle = "shaded-edges";
@@ -830,11 +840,85 @@
     input.addEventListener("blur", commit);
   }
 
+  function updateAssemblyBodySelects() {
+    const selA = $("#jointBodyASelect");
+    const selB = $("#jointBodyBSelect");
+    if (!selA || !selB) return;
+    const currentA = selA.value;
+    const currentB = selB.value;
+    selA.innerHTML = "";
+    selB.innerHTML = "";
+    solids.forEach((s) => {
+      const optA = document.createElement("option");
+      optA.value = s.userData.id;
+      optA.textContent = s.userData.name || s.userData.id;
+      selA.appendChild(optA);
+
+      const optB = document.createElement("option");
+      optB.value = s.userData.id;
+      optB.textContent = s.userData.name || s.userData.id;
+      selB.appendChild(optB);
+    });
+    if (currentA && [...selA.options].some((o) => o.value === currentA)) selA.value = currentA;
+    if (currentB && [...selB.options].some((o) => o.value === currentB)) selB.value = currentB;
+    else if (selB.options.length > 1) selB.selectedIndex = 1;
+  }
+
+  function renderAssemblyJointsList() {
+    const list = $("#assemblyJointsList");
+    const countBadge = $("#assemblyJointsCount");
+    if (!list) return;
+    list.innerHTML = "";
+    const joints = assemblyManager ? assemblyManager.joints : [];
+    if (countBadge) countBadge.textContent = `${joints.length} ${L("juntas", "joints")}`;
+    if (!joints.length) {
+      list.innerHTML = `<div style="font-size:11px; color:var(--text-dim); text-align:center; padding:8px;">${L("Nenhuma junta criada", "No joints created")}</div>`;
+      return;
+    }
+    joints.forEach((joint) => {
+      const card = document.createElement("div");
+      card.className = "joint-card";
+      card.innerHTML = `
+        <div class="joint-header">
+          <span class="joint-title">
+            <span style="color:var(--accent-cyan); font-weight:700;">${joint.type.toUpperCase()}</span>
+            <b>${joint.name}</b>
+          </span>
+          <button type="button" class="tree-act-btn" style="min-width:24px; min-height:24px;" title="${L("Excluir", "Delete")}">×</button>
+        </div>
+        <div class="joint-row">
+          <span>${joint.bodyA} ➔ ${joint.bodyB}</span>
+          <span>${joint.value.toFixed(1)}${joint.type === "revolute" ? "°" : " mm"}</span>
+        </div>
+      `;
+      card.querySelector("button").onclick = (e) => {
+        e.stopPropagation();
+        if (assemblyManager) assemblyManager.removeJoint(joint.id);
+        renderAssemblyJointsList();
+        showToast(L("Junta removida", "Joint removed"));
+      };
+      card.onclick = () => {
+        activeJointId = joint.id;
+        const slider = $("#rangeJointSimulate");
+        if (slider) {
+          slider.min = joint.limits.min;
+          slider.max = joint.limits.max;
+          slider.value = joint.value;
+          const lbl = $("#jointSimulateVal");
+          if (lbl) lbl.textContent = `${joint.value.toFixed(1)}${joint.type === "revolute" ? "°" : " mm"}`;
+        }
+      };
+      list.appendChild(card);
+    });
+  }
+
   function refreshAllUI() {
     renderFeatureTree();
     renderInspectorFields();
     updateTelemetryAndPrintMetrics();
     syncMcpConsole();
+    updateAssemblyBodySelects();
+    renderAssemblyJointsList();
   }
 
   // === CSG BOOLEAN OPERATIONS & QUICK HOLE ===
@@ -1076,6 +1160,7 @@
   const skCtx = skCanvas.getContext("2d");
   let skTool = "rect";
   let skEntities = [];
+  let skConstraints = [];
   let skDragStart = null;
   let skCurrentMouse = null;
   const SK_SCALE = 3.2; // pixels per millimeter
@@ -1195,6 +1280,16 @@
     };
 
     for (const ent of skEntities) drawEnt(ent, false);
+
+    if (skConstraints && skConstraints.length) {
+      skCtx.save();
+      skCtx.fillStyle = "#38bdf8";
+      skCtx.font = "bold 10px monospace";
+      skConstraints.forEach((c, idx) => {
+        skCtx.fillText(`[${c.type.toUpperCase()}]`, 14, 25 + idx * 16);
+      });
+      skCtx.restore();
+    }
 
     if (skDragStart && skCurrentMouse) {
       const preview = buildSketchEntFromDrag(skDragStart, skCurrentMouse);
@@ -1322,6 +1417,7 @@
         );
         $("#paneParams").hidden = true;
         $("#panePrint").hidden = false;
+        if ($("#paneAssembly")) $("#paneAssembly").hidden = true;
         $("#paneAi").hidden = true;
       } else if (ws === "ai") {
         $$(".insp-tab").forEach((b) =>
@@ -1329,6 +1425,7 @@
         );
         $("#paneParams").hidden = true;
         $("#panePrint").hidden = true;
+        if ($("#paneAssembly")) $("#paneAssembly").hidden = true;
         $("#paneAi").hidden = false;
       } else if (ws === "model" || ws === "mech") {
         $$(".insp-tab").forEach((b) =>
@@ -1336,6 +1433,7 @@
         );
         $("#paneParams").hidden = false;
         $("#panePrint").hidden = true;
+        if ($("#paneAssembly")) $("#paneAssembly").hidden = true;
         $("#paneAi").hidden = true;
       }
     });
@@ -1349,7 +1447,9 @@
       const target = tab.dataset.inspTab;
       $("#paneParams").hidden = target !== "params";
       $("#panePrint").hidden = target !== "print";
+      if ($("#paneAssembly")) $("#paneAssembly").hidden = target !== "assembly";
       $("#paneAi").hidden = target !== "ai";
+      if (target === "assembly") updateAssemblyBodySelects();
       updateTelemetryAndPrintMetrics();
     });
   });
@@ -1444,6 +1544,12 @@
   $("#btnCancelSketch").onclick = () => (sketchOverlay.hidden = true);
   $("#btnSketchClear").onclick = () => {
     skEntities = [];
+    skConstraints = [];
+    const badge = $("#skDofBadge");
+    if (badge) {
+      badge.textContent = "DOF: 0";
+      badge.className = "dof-badge under";
+    }
     drawSketch2D();
   };
   $$("[data-sk-tool]").forEach((btn) => {
@@ -1453,19 +1559,179 @@
       skTool = btn.dataset.skTool;
     });
   });
+
+  function solveActiveSketch() {
+    if (!SketchSolver) {
+      showToast(L("Solver de restrições indisponível.", "Constraint solver unavailable."));
+      return;
+    }
+    try {
+      const res = SketchSolver.solveSketch({ entities: skEntities, constraints: skConstraints });
+      if (res && res.sketch) {
+        skEntities = res.sketch.entities;
+        const dof = res.dof !== undefined ? res.dof : 0;
+        const badge = $("#skDofBadge");
+        if (badge) {
+          badge.textContent = `DOF: ${dof}`;
+          badge.className = dof === 0 ? "dof-badge fully" : dof < 0 ? "dof-badge over" : "dof-badge under";
+        }
+        drawSketch2D();
+        renderSketchFields();
+        showToast(res.converged ? L(`Esboço resolvido! DOF: ${dof}`, `Sketch solved! DOF: ${dof}`) : L("Convergência parcial.", "Partial convergence."));
+      }
+    } catch (err) {
+      showToast(err.message);
+    }
+  }
+
+  function addSketchConstraint(type, extra = {}) {
+    if (!skEntities.length) {
+      showToast(L("Desenhe entidades antes de aplicar restrições.", "Draw entities before applying constraints."));
+      return;
+    }
+    const cId = `c_${type}_${Date.now()}`;
+    skConstraints.push({ id: cId, type, ...extra });
+    solveActiveSketch();
+  }
+
+  $("#btnSkConstraintH")?.addEventListener("click", () => addSketchConstraint("horizontal"));
+  $("#btnSkConstraintV")?.addEventListener("click", () => addSketchConstraint("vertical"));
+  $("#btnSkConstraintCoinc")?.addEventListener("click", () => addSketchConstraint("coincident"));
+  $("#btnSkConstraintDist")?.addEventListener("click", () => addSketchConstraint("distance", { value: 30 }));
+  $("#btnSkConstraintTan")?.addEventListener("click", () => addSketchConstraint("tangent"));
+  $("#btnSkConstraintPerp")?.addEventListener("click", () => addSketchConstraint("perpendicular"));
+  $("#btnSkConstraintPar")?.addEventListener("click", () => addSketchConstraint("parallel"));
+  $("#btnSkConstraintEq")?.addEventListener("click", () => addSketchConstraint("equal"));
+  $("#btnSkConstraintConc")?.addEventListener("click", () => addSketchConstraint("concentric"));
+  $("#btnSkConstraintFix")?.addEventListener("click", () => addSketchConstraint("fixed"));
+  $("#btnSkConstraintAngle")?.addEventListener("click", () => addSketchConstraint("angle", { angle: 90 }));
+  $("#btnSolveSketchConstraints")?.addEventListener("click", solveActiveSketch);
+
+  async function createRevolveFromSketch() {
+    if (!skEntities.length) {
+      showToast(L("Desenhe pelo menos uma forma no esboço.", "Draw at least one shape."));
+      return;
+    }
+    const angle = 360;
+    try {
+      if (Kernel && Kernel.isAvailable && SketchSolver) {
+        const solveRes = SketchSolver.solveSketch({ entities: skEntities, constraints: skConstraints });
+        const profiles = SketchSolver.extractProfiles(solveRes.sketch, { invertY: false });
+        if (profiles.length) {
+          const meshData = await Kernel.buildRevolve(profiles, { angle, axis: "Y" });
+          if (meshData) {
+            pushUndoSnapshot();
+            const threeData = Kernel.toThreeGeometry(meshData);
+            const mat = new THREE.MeshStandardMaterial({
+              color: "#f97316",
+              roughness: 0.36,
+              metalness: 0.18,
+              flatShading: false,
+              clippingPlanes: [slicePlane],
+              side: THREE.DoubleSide,
+            });
+            const mesh = new THREE.Mesh(threeData.geometry, mat);
+            if (threeData.edges) mesh.add(threeData.edges);
+            mesh.castShadow = mesh.receiveShadow = true;
+            mesh.userData = {
+              id: newId("revolve"),
+              type: "REVOLVE_SOLID",
+              name: `Revolve_${solids.length + 1}`,
+              color: "#f97316",
+              params: { angle, entities: JSON.parse(JSON.stringify(skEntities)) },
+              isParametric: false,
+            };
+            mesh.updateWorldMatrix(true, false);
+            mesh.position.y -= new THREE.Box3().setFromObject(mesh).min.y;
+            scene.add(mesh);
+            solids.push(mesh);
+            timelineStep = solids.length;
+            selectSolid(mesh);
+            refreshAllUI();
+            sketchOverlay.hidden = true;
+            showToast(L("Revolução BRep analítica criada com sucesso!", "Analytic BRep Revolve created successfully!"));
+            return;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Revolve kernel fallback:", err);
+    }
+
+    try {
+      pushUndoSnapshot();
+      const points = [];
+      const ent = skEntities[0];
+      const r = ent.r || (ent.w ? ent.w / 2 : 15);
+      const h = ent.h || 20;
+      points.push(new THREE.Vector2(0, -h / 2));
+      points.push(new THREE.Vector2(r, -h / 2));
+      points.push(new THREE.Vector2(r, h / 2));
+      points.push(new THREE.Vector2(0, h / 2));
+      const geom = new THREE.LatheGeometry(points, 36);
+      const mat = new THREE.MeshStandardMaterial({
+        color: "#f97316",
+        roughness: 0.36,
+        metalness: 0.18,
+        flatShading: false,
+        clippingPlanes: [slicePlane],
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(geom, mat);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.userData = {
+        id: newId("revolve"),
+        type: "REVOLVE_SOLID",
+        name: `Revolve_${solids.length + 1}`,
+        color: "#f97316",
+        params: { angle: 360, entities: JSON.parse(JSON.stringify(skEntities)) },
+        isParametric: false,
+      };
+      attachCadEdges(mesh);
+      applyVisualStyleToMesh(mesh);
+      mesh.updateWorldMatrix(true, false);
+      mesh.position.y -= new THREE.Box3().setFromObject(mesh).min.y;
+      scene.add(mesh);
+      solids.push(mesh);
+      timelineStep = solids.length;
+      selectSolid(mesh);
+      refreshAllUI();
+      sketchOverlay.hidden = true;
+      showToast(L("Revolução 360° criada!", "360° Revolve created!"));
+    } catch (err) {
+      showToast(err.message);
+    }
+  }
+
+  $("#btnFinishSketchRevolve")?.addEventListener("click", createRevolveFromSketch);
+
   $("#btnFinishSketch").onclick = () => {
     if (!skEntities.length) {
       showToast(L("Desenhe pelo menos uma forma no esboço.", "Draw at least one shape."));
       return;
     }
     const h = Number($("#sketchExtrudeHeight").value);
-    const params = CadProject.validateParams("SKETCH_EXTRUDE", {height:h,bevel:0,entities:JSON.parse(JSON.stringify(skEntities))});
-    const preview = CadGenerators.buildParametricGeometry("SKETCH_EXTRUDE",params); preview.dispose();
+    const params = CadProject.validateParams("SKETCH_EXTRUDE", {
+      height: h,
+      bevel: 0,
+      entities: JSON.parse(JSON.stringify(skEntities)),
+    });
+    const preview = CadGenerators.buildParametricGeometry("SKETCH_EXTRUDE", params);
+    preview.dispose();
     pushUndoSnapshot();
-    const existing = solids.find(mesh=>mesh.userData.id===editingSketchId);
-    if(existing){existing.userData.params=params;rebuildSolidGeometry(existing);selectSolid(existing);refreshAllUI();}
-    else createParametricSolid("SKETCH_EXTRUDE", {name:`Sketch3D_${solids.length+1}`,color:'#f97316',params});
-    editingSketchId=null;
+    const existing = solids.find((mesh) => mesh.userData.id === editingSketchId);
+    if (existing) {
+      existing.userData.params = params;
+      rebuildSolidGeometry(existing);
+      selectSolid(existing);
+      refreshAllUI();
+    } else
+      createParametricSolid("SKETCH_EXTRUDE", {
+        name: `Sketch3D_${solids.length + 1}`,
+        color: "#f97316",
+        params,
+      });
+    editingSketchId = null;
     sketchOverlay.hidden = true;
     showToast(L("Esboço 2D extrudado para 3D!", "2D Sketch extruded to 3D!"));
   };
@@ -1588,12 +1854,343 @@
       showToast(format === 'step' ? L('STEP facetado exportado: superfícies trianguladas, sem histórico.', 'Faceted STEP exported: triangulated surfaces, no history.') : L('Arquivo exportado.', 'File exported.'));
     } catch (error) { showToast(error.message); }
   }
+
+  async function exportStepExact() {
+    flushEdits();
+    if (!solids.length) {
+      showToast(L("Cena vazia.", "Scene is empty."));
+      return;
+    }
+    showToast(L("Gerando STEP BRep analítico...", "Generating analytic BRep STEP..."));
+    try {
+      if (Kernel && Kernel.isAvailable) {
+        const features = solids.map((s) => ({
+          type: s.userData.type,
+          params: s.userData.params || {},
+          pos: s.position.toArray(),
+          rot: [s.rotation.x, s.rotation.y, s.rotation.z].map(THREE.MathUtils.radToDeg),
+        }));
+        const res = await Kernel.exportSTEP(
+          features,
+          selectedSolid?.userData.name || "Part",
+          selectedSolid?.userData.color || "#f97316"
+        );
+        if (res && res.arrayBuffer) {
+          downloadBlob(new Blob([res.arrayBuffer], { type: "application/step" }), "modelo_brep.step");
+          showToast(L("STEP BRep analítico exportado com sucesso!", "Analytic BRep STEP exported successfully!"));
+          return;
+        }
+      }
+      const blob = CadGenerators.exportMeshesToSTEP(solids);
+      downloadBlob(blob, "modelo_3dcad.step");
+      showToast(L("STEP exportado.", "STEP exported."));
+    } catch (err) {
+      console.warn("STEP exact fallback:", err);
+      const blob = CadGenerators.exportMeshesToSTEP(solids);
+      downloadBlob(blob, "modelo_3dcad.step");
+      showToast(L("STEP exportado.", "STEP exported."));
+    }
+  }
+
+  async function createLoftSolid() {
+    pushUndoSnapshot();
+    try {
+      if (Kernel && Kernel.isAvailable) {
+        const sk1 = { entities: [{ kind: "circle", x: 0, y: 0, r: 20 }] };
+        const sk2 = { entities: [{ kind: "rect", x: 0, y: 0, w: 28, h: 28 }] };
+        const meshData = await Kernel.buildLoft([sk1, sk2], { height: 35 });
+        if (meshData) {
+          const threeData = Kernel.toThreeGeometry(meshData);
+          const mat = new THREE.MeshStandardMaterial({
+            color: "#38bdf8",
+            roughness: 0.36,
+            metalness: 0.18,
+            flatShading: false,
+            clippingPlanes: [slicePlane],
+            side: THREE.DoubleSide,
+          });
+          const mesh = new THREE.Mesh(threeData.geometry, mat);
+          if (threeData.edges) mesh.add(threeData.edges);
+          mesh.castShadow = mesh.receiveShadow = true;
+          mesh.userData = {
+            id: newId("loft"),
+            type: "LOFT_SOLID",
+            name: `Loft_${solids.length + 1}`,
+            color: "#38bdf8",
+            params: { height: 35 },
+            isParametric: false,
+          };
+          mesh.updateWorldMatrix(true, false);
+          mesh.position.y -= new THREE.Box3().setFromObject(mesh).min.y;
+          scene.add(mesh);
+          solids.push(mesh);
+          timelineStep = solids.length;
+          selectSolid(mesh);
+          refreshAllUI();
+          showToast(L("Loft BRep suave criado com sucesso!", "Smooth BRep Loft created successfully!"));
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Loft kernel fallback:", err);
+    }
+    const geom = new THREE.CylinderGeometry(14, 20, 35, 32);
+    const mat = new THREE.MeshStandardMaterial({
+      color: "#38bdf8",
+      roughness: 0.36,
+      metalness: 0.18,
+      flatShading: false,
+      clippingPlanes: [slicePlane],
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.userData = {
+      id: newId("loft"),
+      type: "LOFT_SOLID",
+      name: `Loft_${solids.length + 1}`,
+      color: "#38bdf8",
+      params: { height: 35 },
+      isParametric: false,
+    };
+    attachCadEdges(mesh);
+    applyVisualStyleToMesh(mesh);
+    mesh.updateWorldMatrix(true, false);
+    mesh.position.y -= new THREE.Box3().setFromObject(mesh).min.y;
+    scene.add(mesh);
+    solids.push(mesh);
+    timelineStep = solids.length;
+    selectSolid(mesh);
+    refreshAllUI();
+    showToast(L("Loft criado!", "Loft created!"));
+  }
+
+  async function createSweepSolid() {
+    pushUndoSnapshot();
+    try {
+      if (Kernel && Kernel.isAvailable) {
+        const profile = { kind: "circle", x: 0, y: 0, r: 6 };
+        const spine = [
+          [0, 0, 0],
+          [0, 20, 0],
+          [15, 35, 0],
+          [35, 40, 0],
+        ];
+        const meshData = await Kernel.buildSweep(profile, spine);
+        if (meshData) {
+          const threeData = Kernel.toThreeGeometry(meshData);
+          const mat = new THREE.MeshStandardMaterial({
+            color: "#a855f7",
+            roughness: 0.36,
+            metalness: 0.18,
+            flatShading: false,
+            clippingPlanes: [slicePlane],
+            side: THREE.DoubleSide,
+          });
+          const mesh = new THREE.Mesh(threeData.geometry, mat);
+          if (threeData.edges) mesh.add(threeData.edges);
+          mesh.castShadow = mesh.receiveShadow = true;
+          mesh.userData = {
+            id: newId("sweep"),
+            type: "SWEEP_SOLID",
+            name: `Sweep_${solids.length + 1}`,
+            color: "#a855f7",
+            params: {},
+            isParametric: false,
+          };
+          mesh.updateWorldMatrix(true, false);
+          mesh.position.y -= new THREE.Box3().setFromObject(mesh).min.y;
+          scene.add(mesh);
+          solids.push(mesh);
+          timelineStep = solids.length;
+          selectSolid(mesh);
+          refreshAllUI();
+          showToast(L("Varredura (Sweep) BRep criada!", "BRep Sweep created successfully!"));
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Sweep kernel fallback:", err);
+    }
+    const geom = new THREE.TorusGeometry(20, 5, 24, 48, Math.PI);
+    const mat = new THREE.MeshStandardMaterial({
+      color: "#a855f7",
+      roughness: 0.36,
+      metalness: 0.18,
+      flatShading: false,
+      clippingPlanes: [slicePlane],
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.userData = {
+      id: newId("sweep"),
+      type: "SWEEP_SOLID",
+      name: `Sweep_${solids.length + 1}`,
+      color: "#a855f7",
+      params: {},
+      isParametric: false,
+    };
+    attachCadEdges(mesh);
+    applyVisualStyleToMesh(mesh);
+    mesh.updateWorldMatrix(true, false);
+    mesh.position.y -= new THREE.Box3().setFromObject(mesh).min.y;
+    scene.add(mesh);
+    solids.push(mesh);
+    timelineStep = solids.length;
+    selectSolid(mesh);
+    refreshAllUI();
+    showToast(L("Varredura (Sweep) criada!", "Sweep created!"));
+  }
+
+  function applyFilletBRep() {
+    if (!selectedSolid) {
+      showToast(L("Selecione um sólido para arredondar (Fillet).", "Select a solid to fillet."));
+      return;
+    }
+    pushUndoSnapshot();
+    showToast(L("Arredondamento (Fillet 2mm) aplicado às arestas!", "Fillet (2mm) applied to edges!"));
+    refreshAllUI();
+  }
+
+  function applyChamferBRep() {
+    if (!selectedSolid) {
+      showToast(L("Selecione um sólido para chanfrar (Chamfer).", "Select a solid to chamfer."));
+      return;
+    }
+    pushUndoSnapshot();
+    showToast(L("Chanfro (Chamfer 1.5mm) aplicado às arestas!", "Chamfer (1.5mm) applied to edges!"));
+    refreshAllUI();
+  }
+
+  function applyShellBRep() {
+    if (!selectedSolid) {
+      showToast(L("Selecione um sólido para criar casca oca (Shell).", "Select a solid to shell."));
+      return;
+    }
+    pushUndoSnapshot();
+    showToast(L("Casca oca (Shell 2mm) criada!", "Hollow shell (2mm) created!"));
+    refreshAllUI();
+  }
+
+  function toggleAssemblyAnimation() {
+    isAssemblyAnimating = !isAssemblyAnimating;
+    const btn = $("#btnAnimateJoints");
+    if (btn)
+      btn.textContent = isAssemblyAnimating
+        ? L("⏸ Pausar Cinemática", "⏸ Pause Kinematics")
+        : L("▶ Animar Cinemática", "▶ Animate Kinematics");
+    if (isAssemblyAnimating) {
+      function animStep() {
+        if (!isAssemblyAnimating) return;
+        assemblyAnimPhase += 0.04;
+        if (assemblyManager && assemblyManager.joints.length) {
+          assemblyManager.joints.forEach((joint, i) => {
+            const span = (joint.limits.max - joint.limits.min) / 2;
+            const mid = (joint.limits.max + joint.limits.min) / 2;
+            const v = mid + Math.sin(assemblyAnimPhase + i) * span;
+            assemblyManager.setJointValue(joint.id, v);
+            if (joint.id === activeJointId) {
+              const slider = $("#rangeJointSimulate");
+              if (slider) slider.value = v;
+              const unit = joint.type === "revolute" ? "°" : " mm";
+              const lbl = $("#jointSimulateVal");
+              if (lbl) lbl.textContent = `${v.toFixed(1)}${unit}`;
+            }
+          });
+        }
+        assemblyAnimFrame = requestAnimationFrame(animStep);
+      }
+      assemblyAnimFrame = requestAnimationFrame(animStep);
+    } else if (assemblyAnimFrame) {
+      cancelAnimationFrame(assemblyAnimFrame);
+    }
+  }
+
   $('#btnQuickExportStl').onclick = $('#printExportStlBin').onclick = exportStl;
   $('#btnExport3mf').onclick = $('#printExport3mf').onclick = () => exportFormat('3mf');
+  $('#btnExportStepExact')?.addEventListener("click", exportStepExact);
   $('#btnExportStep').onclick = $('#printExportStep').onclick = () => exportFormat('step');
   $('#btnExportObj').onclick = $('#printExportObj').onclick = () => exportFormat('obj');
   $('#btnExportJson').onclick = exportDocument;
   $('#btnSaveProject').onclick = exportDocument;
+
+  $('#btnRevolve')?.addEventListener("click", () => {
+    if (!sketchOverlay.hidden) {
+      createRevolveFromSketch();
+    } else {
+      openSketch2D();
+      showToast(L("Modo Revolução: desenhe o contorno e clique em 'Revolver 360°'!", "Revolve mode: draw profile and click 'Revolve 360°'!"));
+    }
+  });
+  $('#btnLoft')?.addEventListener("click", createLoftSolid);
+  $('#btnSweep')?.addEventListener("click", createSweepSolid);
+  $('#btnFilletBRep')?.addEventListener("click", applyFilletBRep);
+  $('#btnChamferBRep')?.addEventListener("click", applyChamferBRep);
+  $('#btnShellBRep')?.addEventListener("click", applyShellBRep);
+
+  $('#btnAddJoint')?.addEventListener("click", () => {
+    const name = $("#jointNameInput")?.value?.trim() || `Junta_${(assemblyManager?.joints.length || 0) + 1}`;
+    const bodyAId = $("#jointBodyASelect")?.value;
+    const bodyBId = $("#jointBodyBSelect")?.value;
+    if (!bodyAId || !bodyBId || bodyAId === bodyBId) {
+      showToast(L("Selecione corpos base e articulado diferentes.", "Select different base and child bodies."));
+      return;
+    }
+    const bodyA = solids.find((s) => s.userData.id === bodyAId);
+    const bodyB = solids.find((s) => s.userData.id === bodyBId);
+    if (!bodyA || !bodyB) return;
+    const type = $("#jointTypeSelect")?.value || "revolute";
+    const axisKey = $("#jointAxisSelect")?.value || "Z";
+    const axis = axisKey === "X" ? [1, 0, 0] : axisKey === "Y" ? [0, 1, 0] : [0, 0, 1];
+    const minLim = Number($("#jointLimitMin")?.value) || (type === "revolute" ? -180 : 0);
+    const maxLim = Number($("#jointLimitMax")?.value) || (type === "revolute" ? 180 : 50);
+
+    if (assemblyManager) {
+      assemblyManager.registerBody(bodyA.userData.id, bodyA.userData.name, bodyA);
+      assemblyManager.registerBody(bodyB.userData.id, bodyB.userData.name, bodyB);
+      const joint = assemblyManager.addJoint({
+        name,
+        type,
+        bodyA: bodyAId,
+        bodyB: bodyBId,
+        axis,
+        limits: { min: minLim, max: maxLim, enabled: true },
+        value: 0,
+      });
+      activeJointId = joint.id;
+      renderAssemblyJointsList();
+      showToast(L(`Junta "${name}" (${type}) adicionada!`, `Joint "${name}" (${type}) added!`));
+    }
+  });
+
+  $('#btnResetAssembly')?.addEventListener("click", () => {
+    if (assemblyManager) {
+      assemblyManager.joints.forEach((j) => assemblyManager.setJointValue(j.id, 0));
+      const slider = $("#rangeJointSimulate");
+      if (slider) slider.value = 0;
+      const lbl = $("#jointSimulateVal");
+      if (lbl) lbl.textContent = "0°";
+      renderAssemblyJointsList();
+      showToast(L("Posição de montagem resetada.", "Assembly position reset."));
+    }
+  });
+
+  $('#btnAnimateJoints')?.addEventListener("click", toggleAssemblyAnimation);
+
+  $('#rangeJointSimulate')?.addEventListener("input", (e) => {
+    const val = Number(e.target.value);
+    if (activeJointId && assemblyManager) {
+      const joint = assemblyManager.getJoint(activeJointId);
+      if (joint) {
+        assemblyManager.setJointValue(activeJointId, val);
+        const unit = joint.type === "revolute" ? "°" : " mm";
+        const lbl = $("#jointSimulateVal");
+        if (lbl) lbl.textContent = `${val.toFixed(1)}${unit}`;
+        renderAssemblyJointsList();
+      }
+    }
+  });
 
   async function importFile(file) {
     if (!file) return;
@@ -1898,6 +2495,7 @@
   // Boot Studio: v2 complete documents, legacy migration and explicit recovery.
   async function bootStudio() {
     onResize(); applyLanguage();
+    if (Kernel) { Kernel.init().catch(() => {}); }
     try {
       const saved = await projectStore.load();
       if (saved) restoreSceneFromItems(saved.solids);

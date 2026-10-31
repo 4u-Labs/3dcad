@@ -193,4 +193,5 @@
     lines.push("ENDSEC;","END-ISO-10303-21;");return new Blob([lines.join("\n")+"\n"],{type:"application/step;charset=utf-8"});
   }
   root.CadMesh={EPS,MAX_TRIANGLES,normalize,fromMesh,collect,toGeometry,topology,signedVolume,stl,obj,step};
+  if (typeof module !== "undefined" && module.exports) module.exports = root.CadMesh;
 })(typeof window!=="undefined"?window:globalThis);
