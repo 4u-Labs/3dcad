@@ -77,6 +77,23 @@
       { key: "boreDiameter", pt: "Furo do Eixo (mm)", en: "Shaft Bore (mm)", min: 2, max: 80, step: 0.5 },
       { key: "height", pt: "Altura Total Z (mm)", en: "Total Height Z (mm)", min: 4, max: 100, step: 0.5 },
     ],
+    PILLOW_BLOCK: [
+      { key: "bearingBore", pt: "Furo Rolamento 608 (mm)", en: "Bearing Bore (mm)", min: 4, max: 100, step: 0.1 },
+      { key: "outerRingDia", pt: "Diâmetro do Anel (mm)", en: "Housing Ring Dia (mm)", min: 12, max: 140, step: 1 },
+      { key: "baseWidth", pt: "Largura Base Total X (mm)", en: "Total Base Width X (mm)", min: 30, max: 240, step: 1 },
+      { key: "thickness", pt: "Espessura / Largura Y (mm)", en: "Block Depth Y (mm)", min: 5, max: 60, step: 0.5 },
+      { key: "baseHeight", pt: "Altura da Aba Base Z (mm)", en: "Flange Height Z (mm)", min: 3, max: 30, step: 0.5 },
+      { key: "mountHoleDia", pt: "Furos de Fixação (mm)", en: "Mounting Holes (mm)", min: 0, max: 20, step: 0.2 },
+    ],
+    SNAP_LID_BOX: [
+      { key: "width", pt: "Largura Externa X (mm)", en: "Outer Width X (mm)", min: 20, max: 400, step: 1 },
+      { key: "depth", pt: "Profundidade Y (mm)", en: "Outer Depth Y (mm)", min: 20, max: 400, step: 1 },
+      { key: "topThickness", pt: "Espessura da Tampa Z (mm)", en: "Lid Plate Thickness Z (mm)", min: 1.5, max: 20, step: 0.5 },
+      { key: "lipHeight", pt: "Altura do Rebordo Snap (mm)", en: "Snap Lip Height (mm)", min: 1.5, max: 25, step: 0.5 },
+      { key: "wallThickness", pt: "Parede da Caixa (mm)", en: "Box Wall Thickness (mm)", min: 1.2, max: 15, step: 0.2 },
+      { key: "clearance", pt: "Folga Impressão 3D (mm)", en: "3D Print Clearance (mm)", min: 0, max: 1.5, step: 0.05 },
+      { key: "ventSlots", pt: "Aletas de Ventilação (0/1)", en: "Ventilation Slots (0/1)", min: 0, max: 1, step: 1 },
+    ],
     SKETCH_EXTRUDE: [
       { key: "height", pt: "Altura de Extrusão Z (mm)", en: "Extrusion Height Z (mm)", min: 1, max: 400, step: 0.5 },
       { key: "bevel", pt: "Chanfro / Bevel (mm)", en: "Bevel Size (mm)", min: 0, max: 10, step: 0.2 },
@@ -515,6 +532,126 @@
           return res.geometry;
         }
         return new THREE.CylinderGeometry(od / 2, od / 2, h, 40);
+      }
+
+      case "PILLOW_BLOCK": {
+        const bore = Math.max(4, num(params.bearingBore, 22.2));
+        const ringDia = Math.max(bore + 5, num(params.outerRingDia, 34));
+        const baseW = Math.max(ringDia + 16, num(params.baseWidth, 68));
+        const depth = Math.max(5, num(params.thickness, 14));
+        const flangeH = Math.max(3, num(params.baseHeight, 6));
+        const mHole = Math.max(0, num(params.mountHoleDia, 4.4));
+
+        const rOut = ringDia / 2;
+        const centerY = Math.max(rOut, flangeH + rOut * 0.45);
+
+        // Build front profile of Pillow Block in XY plane and extrude along Z (depth)
+        const shape = new THREE.Shape();
+        const hw = baseW / 2;
+        shape.moveTo(-hw, 0);
+        shape.lineTo(hw, 0);
+        shape.lineTo(hw, flangeH);
+        shape.lineTo(rOut, flangeH);
+        shape.absarc(0, centerY, rOut, 0, Math.PI, false);
+        shape.lineTo(-rOut, flangeH);
+        shape.lineTo(-hw, flangeH);
+        shape.closePath();
+
+        // Bearing bore hole
+        shape.holes.push(makeCirclePath(0, centerY, bore / 2, 48));
+
+        let geom = new THREE.ExtrudeGeometry(shape, {
+          depth,
+          bevelEnabled: false,
+          curveSegments: 40,
+        });
+        geom.computeBoundingBox();
+        const minY = geom.boundingBox.min.y;
+        const maxY = geom.boundingBox.max.y;
+        geom.translate(0, -(minY + maxY) / 2, -depth / 2);
+
+        if (typeof CSG !== "undefined" && mHole >= 1) {
+          const mat = new THREE.MeshStandardMaterial();
+          const baseMesh = new THREE.Mesh(geom, mat);
+          baseMesh.updateMatrix();
+          let csg = CSG.fromMesh(baseMesh);
+          const holeX = (hw + rOut) / 2;
+          const rH = mHole / 2;
+          const yFlangeMid = -(minY + maxY) / 2 + flangeH / 2;
+          for (const sx of [-holeX, holeX]) {
+            const cyl = new THREE.Mesh(new THREE.CylinderGeometry(rH, rH, flangeH * 4, 24), mat);
+            cyl.position.set(sx, yFlangeMid, 0);
+            cyl.updateMatrix();
+            csg = csg.subtract(CSG.fromMesh(cyl));
+          }
+          const res = CSG.toMesh(csg, new THREE.Matrix4(), mat);
+          geom = res.geometry;
+        }
+        geom.computeVertexNormals();
+        return geom;
+      }
+
+      case "SNAP_LID_BOX": {
+        const w = Math.max(20, num(params.width, 85));
+        const d = Math.max(20, num(params.depth, 58));
+        const topT = Math.max(1.5, num(params.topThickness, 3));
+        const lipH = Math.max(1.5, num(params.lipHeight, 4));
+        const wall = Math.max(1.2, num(params.wallThickness, 2.5));
+        const clear = Math.max(0, num(params.clearance, 0.3));
+        const hasVents = num(params.ventSlots, 1) === 1;
+
+        const totalH = topT + lipH;
+        const lipOuterW = Math.max(8, w - (wall + clear) * 2);
+        const lipOuterD = Math.max(8, d - (wall + clear) * 2);
+        const lipWall = Math.max(1.4, wall * 0.8);
+
+        if (typeof CSG !== "undefined") {
+          const mat = new THREE.MeshStandardMaterial();
+          const topPlate = new THREE.Mesh(new THREE.BoxGeometry(w, topT, d), mat);
+          topPlate.position.set(0, -totalH / 2 + topT / 2, 0);
+          topPlate.updateMatrix();
+
+          const lipOuter = new THREE.Mesh(
+            new THREE.BoxGeometry(lipOuterW, lipH, lipOuterD),
+            mat
+          );
+          lipOuter.position.set(0, -totalH / 2 + topT + lipH / 2, 0);
+          lipOuter.updateMatrix();
+
+          const lipInner = new THREE.Mesh(
+            new THREE.BoxGeometry(
+              Math.max(2, lipOuterW - lipWall * 2),
+              lipH + 2,
+              Math.max(2, lipOuterD - lipWall * 2)
+            ),
+            mat
+          );
+          lipInner.position.set(0, -totalH / 2 + topT + lipH / 2 + 0.5, 0);
+          lipInner.updateMatrix();
+
+          let csg = CSG.fromMesh(topPlate)
+            .union(CSG.fromMesh(lipOuter))
+            .subtract(CSG.fromMesh(lipInner));
+
+          if (hasVents && lipOuterW > 24 && lipOuterD > 20) {
+            const slotW = 2.6;
+            const slotD = Math.min(36, lipOuterD * 0.55);
+            for (let i = -2; i <= 2; i++) {
+              const slot = new THREE.Mesh(
+                new THREE.BoxGeometry(slotW, totalH * 3, slotD),
+                mat
+              );
+              slot.position.set(i * (slotW * 2.4), 0, 0);
+              slot.updateMatrix();
+              csg = csg.subtract(CSG.fromMesh(slot));
+            }
+          }
+
+          const res = CSG.toMesh(csg, new THREE.Matrix4(), mat);
+          res.geometry.computeVertexNormals();
+          return res.geometry;
+        }
+        return new THREE.BoxGeometry(w, totalH, d);
       }
 
       case "SKETCH_EXTRUDE": {
@@ -1010,7 +1147,49 @@ ${tXml}
       };
     }
 
-    // 5. Mounting Plate (Placa / Base / Chapa)
+    // 5. Pillow Block / Bearing 608 (Mancal / Rolamento)
+    if (/\b(mancal|rolamento|608|bearing|pillow)\b/.test(norm)) {
+      const bearingBore = /\b608\b/.test(norm) ? 22.2 : nums[0] || 22.2;
+      const outerRingDia = Math.max(bearingBore + 10, Math.round(bearingBore * 1.55));
+      const baseWidth = Math.max(outerRingDia + 28, nums[1] || 68);
+      return {
+        action: "CREATE",
+        type: "PILLOW_BLOCK",
+        name: `Mancal_608_D${bearingBore}`,
+        color: "#10b981",
+        params: {
+          bearingBore,
+          outerRingDia,
+          baseWidth,
+          thickness: 14,
+          baseHeight: 6,
+          mountHoleDia: 4.4,
+        },
+      };
+    }
+
+    // 6. Snap-Fit Lid / Cover (Tampa Snap-Fit)
+    if (/\b(tampa|snap|lid|cover)\b/.test(norm)) {
+      const width = nums[0] || 85;
+      const depth = nums[1] || 58;
+      return {
+        action: "CREATE",
+        type: "SNAP_LID_BOX",
+        name: `Tampa_SnapFit_${width}x${depth}`,
+        color: "#8b5cf6",
+        params: {
+          width,
+          depth,
+          topThickness: 3,
+          lipHeight: 4,
+          wallThickness: 2.5,
+          clearance: 0.3,
+          ventSlots: 1,
+        },
+      };
+    }
+
+    // 7. Mounting Plate (Placa / Base / Chapa)
     if (/\b(placa|chapa|flange|plate|base)\b/.test(norm)) {
       const width = nums[0] || 90;
       const depth = nums[1] || 70;
@@ -1025,7 +1204,7 @@ ${tXml}
       };
     }
 
-    // 6. Bolt / Nut (Parafuso / Porca)
+    // 8. Bolt / Nut (Parafuso / Porca)
     if (/\b(parafuso|porca|bolt|nut|screw)\b/.test(norm)) {
       const isNut = /\b(porca|nut)\b/.test(norm) ? 1 : 0;
       const metricDia = mSize || nums[0] || 6;
@@ -1045,7 +1224,7 @@ ${tXml}
       };
     }
 
-    // 7. Pulley / Spacer (Polia / Roldana)
+    // 9. Pulley / Spacer (Polia / Roldana)
     if (/\b(polia|roldana|pulley)\b/.test(norm)) {
       const outerDiameter = nums[0] || 42;
       const grooveDiameter = nums[1] || Math.round(outerDiameter * 0.75);

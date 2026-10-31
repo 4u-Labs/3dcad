@@ -171,6 +171,14 @@
               <span class="ico">🛞</span>
               <span class="lbl" data-i18n="rbPulley">Polia</span>
             </button>
+            <button type="button" class="tool-btn accent" data-add-type="PILLOW_BLOCK" title="Mancal para Rolamento 608 (Ø22.2mm)">
+              <span class="ico">🪩</span>
+              <span class="lbl" data-i18n="rbPillow">Mancal 608</span>
+            </button>
+            <button type="button" class="tool-btn accent" data-add-type="SNAP_LID_BOX" title="Tampa com Rebordo de Encaixe Snap-Fit">
+              <span class="ico">🗃️</span>
+              <span class="lbl" data-i18n="rbSnapLid">Tampa Snap</span>
+            </button>
           </div>
           <span class="ribbon-label" data-i18n="grpMechanical">Geradores Mecânicos</span>
         </div>
@@ -337,6 +345,9 @@
 
           <!-- Floating Bottom HUD Bar -->
           <div class="viewport-hud-bar">
+            <button type="button" class="hud-btn" id="hudDragModeBtn" title="Mover peça com o mouse no plano da mesa (ou segure Shift + arrastar)">
+              ✥ <span data-i18n="hudDrag">Mover Peça</span>
+            </button>
             <button type="button" class="hud-btn" id="hudZoomFit" title="Enquadrar tudo (F)">
               ⛶ <span data-i18n="hudFit">Enquadrar</span>
             </button>
@@ -431,7 +442,8 @@
                 0 / 0
               </span>
             </div>
-            <div>
+            <div style="display: flex; align-items: center; gap: 10px">
+              <span id="autoSaveBadge" class="tree-type-tag" style="color: #4ade80">💾 Auto-Save</span>
               <span data-i18n="bedInfo">Mesa de Impressão: 220 × 220 mm · Unidades: milímetros (mm)</span>
             </div>
           </div>
@@ -498,6 +510,14 @@
                   <input type="number" id="rotZ" class="num-input" step="5" value="0" />
                 </div>
               </div>
+              <div class="btn-row-3" style="margin-top: 4px">
+                <button type="button" class="action-btn" id="btnRotX90" title="Girar 90° no eixo X e assentar na mesa">↻ X +90°</button>
+                <button type="button" class="action-btn" id="btnRotY90" title="Girar 90° no eixo Y e assentar na mesa">↻ Y +90°</button>
+                <button type="button" class="action-btn" id="btnRotZ90" title="Girar 90° no eixo Z">↻ Z +90°</button>
+              </div>
+              <button type="button" class="action-btn" id="btnLayFlatBed" style="margin-top: 2px">
+                ⤓ <span data-i18n="layFlatBtn">Assentar Peça na Mesa (Z = 0 mm)</span>
+              </button>
             </div>
 
             <!-- Color & Appearance -->
@@ -718,6 +738,20 @@
                   data-prompt="Furar peca selecionada com furo de 6mm"
                 >
                   🕳 Furar peça Ø6mm
+                </button>
+                <button
+                  type="button"
+                  class="prompt-chip"
+                  data-prompt="Mancal rolamento 608 base 68mm"
+                >
+                  🪩 Mancal Rolamento 608
+                </button>
+                <button
+                  type="button"
+                  class="prompt-chip"
+                  data-prompt="Tampa snap-fit 85x58mm com ventilacao"
+                >
+                  🗃️ Tampa Snap-Fit 85×58
                 </button>
               </div>
             </div>

@@ -36,6 +36,8 @@
       rbPlate: "Placa Furada",
       rbBolt: "Parafuso/Porca",
       rbPulley: "Polia",
+      rbPillow: "Mancal 608",
+      rbSnapLid: "Tampa Snap",
       grpMechanical: "Geradores Mecânicos",
       rbUnion: "Unir (CSG)",
       rbSubtract: "Subtrair/Furar",
@@ -66,6 +68,7 @@
       vcTop: "TOPO",
       vcFront: "FRENTE",
       vcRight: "DIR",
+      hudDrag: "Mover Peça",
       hudFit: "Enquadrar",
       hudDrop: "Mesa Z=0",
       hudCenter: "Centrar",
@@ -91,6 +94,7 @@
       selectedPartTitle: "Peça Selecionada",
       lblPartName: "Nome da Peça",
       transformTitle: "Posição (mm) & Rotação (°)",
+      layFlatBtn: "Assentar Peça na Mesa (Z = 0 mm)",
       materialColorTitle: "Cor & Acabamento",
       csgCardTitle: "Operação Booleana (CSG)",
       csgSecondSolid: "2º Sólido (Ferramenta):",
@@ -148,6 +152,8 @@
       rbPlate: "Mount Plate",
       rbBolt: "Hex Bolt/Nut",
       rbPulley: "Pulley",
+      rbPillow: "608 Bearing",
+      rbSnapLid: "Snap-Fit Lid",
       grpMechanical: "Mechanical Generators",
       rbUnion: "Union (CSG)",
       rbSubtract: "Subtract/Cut",
@@ -178,6 +184,7 @@
       vcTop: "TOP",
       vcFront: "FRONT",
       vcRight: "RIGHT",
+      hudDrag: "Move Part",
       hudFit: "Zoom Fit",
       hudDrop: "Bed Z=0",
       hudCenter: "Center",
@@ -203,6 +210,7 @@
       selectedPartTitle: "Selected Body",
       lblPartName: "Body Name",
       transformTitle: "Position (mm) & Rotation (°)",
+      layFlatBtn: "Lay Flat on Bed (Z = 0 mm)",
       materialColorTitle: "Color & Finish",
       csgCardTitle: "Boolean Operation (CSG)",
       csgSecondSolid: "2nd Solid (Tool):",
@@ -343,6 +351,8 @@
     MOUNTING_PLATE: { width: 85, depth: 65, thickness: 5, cornerRadius: 6, holeDiameter: 4.2, centerBore: 12 },
     HEX_BOLT: { metricDia: 6, shaftLength: 22, headWidth: 10, headHeight: 4.2, nutBore: 0 },
     PULLEY: { outerDiameter: 40, grooveDiameter: 30, boreDiameter: 8, height: 14 },
+    PILLOW_BLOCK: { bearingBore: 22.2, outerRingDia: 34, baseWidth: 68, thickness: 14, baseHeight: 6, mountHoleDia: 4.4 },
+    SNAP_LID_BOX: { width: 85, depth: 58, topThickness: 3, lipHeight: 4, wallThickness: 2.5, clearance: 0.3, ventSlots: 1 },
   };
 
   const DEFAULT_COLORS = {
@@ -357,6 +367,8 @@
     MOUNTING_PLATE: "#10b981",
     HEX_BOLT: "#94a3b8",
     PULLEY: "#f97316",
+    PILLOW_BLOCK: "#10b981",
+    SNAP_LID_BOX: "#8b5cf6",
     SKETCH_EXTRUDE: "#f97316",
   };
 
@@ -758,6 +770,20 @@
     }
   }
 
+  let isBooting = true;
+  function saveAutoSave() {
+    if (isBooting) return;
+    try {
+      const state = serializeSceneState();
+      localStorage.setItem("3dcad_autosave_v1", JSON.stringify(state));
+      const badge = $("#autoSaveBadge");
+      if (badge) {
+        badge.textContent = L("💾 Salvo", "💾 Saved");
+        badge.style.color = "#4ade80";
+      }
+    } catch {}
+  }
+
   function syncMcpConsole() {
     const mcpEl = $("#mcpJsonConsole");
     if (!mcpEl) return;
@@ -767,6 +793,7 @@
       solids: serializeSceneState(),
     };
     mcpEl.value = JSON.stringify(payload, null, 2);
+    saveAutoSave();
   }
 
   function refreshAllUI() {
@@ -969,24 +996,75 @@
     controls.update();
   }
 
-  // === RAYCASTING SELECTION & 3D CALIPER MEASUREMENT ===
+  // === RAYCASTING SELECTION, 3D PART DRAGGING & 3D CALIPER MEASUREMENT ===
   const raycaster = new THREE.Raycaster();
   const mouse = new THREE.Vector2();
   let pointerDownPos = { x: 0, y: 0 };
+  let dragMode = false;
+  let draggingSolid = null;
+  const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const dragIntersect = new THREE.Vector3();
+  const dragOffset = new THREE.Vector3();
+
+  function updateMouseRay(e) {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+  }
 
   canvas.addEventListener("pointerdown", (e) => {
     pointerDownPos = { x: e.clientX, y: e.clientY };
+    if (e.button !== 0 || measureMode) return;
+    if (dragMode || e.shiftKey) {
+      updateMouseRay(e);
+      const visibleSolids = solids.filter((s) => s.visible);
+      const hits = raycaster.intersectObjects(visibleSolids, false);
+      if (hits.length > 0) {
+        pushUndoSnapshot();
+        draggingSolid = hits[0].object;
+        selectSolid(draggingSolid);
+        dragPlane.setFromNormalAndCoplanarPoint(
+          new THREE.Vector3(0, 1, 0),
+          draggingSolid.position
+        );
+        if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
+          dragOffset.subVectors(draggingSolid.position, dragIntersect);
+        }
+        controls.enabled = false;
+        canvas.style.cursor = "grabbing";
+      }
+    }
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    if (!draggingSolid) return;
+    updateMouseRay(e);
+    if (raycaster.ray.intersectPlane(dragPlane, dragIntersect)) {
+      const nx = Math.round(dragIntersect.x + dragOffset.x);
+      const nz = Math.round(dragIntersect.z + dragOffset.z);
+      draggingSolid.position.x = Math.max(-105, Math.min(105, nx));
+      draggingSolid.position.z = Math.max(-105, Math.min(105, nz));
+      if ($("#posX")) $("#posX").value = draggingSolid.position.x;
+      if ($("#posY")) $("#posY").value = draggingSolid.position.z;
+      updateTelemetryAndPrintMetrics();
+    }
+  });
+
+  window.addEventListener("pointerup", () => {
+    if (draggingSolid) {
+      draggingSolid = null;
+      controls.enabled = true;
+      canvas.style.cursor = dragMode ? "move" : "default";
+      syncMcpConsole();
+    }
   });
 
   canvas.addEventListener("pointerup", (e) => {
     if (e.button !== 0) return;
     if (Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y) > 5) return;
 
-    const rect = canvas.getBoundingClientRect();
-    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-    raycaster.setFromCamera(mouse, camera);
-
+    updateMouseRay(e);
     const visibleSolids = solids.filter((s) => s.visible);
     const hits = raycaster.intersectObjects(visibleSolids, false);
 
@@ -1465,21 +1543,56 @@
   $$("[data-view]").forEach((btn) => {
     btn.addEventListener("click", () => setStandardView(btn.dataset.view));
   });
-  $("#hudZoomFit").onclick = zoomFitScene;
-  $("#hudDropBed").onclick = () => {
+
+  $("#hudDragModeBtn").onclick = () => {
+    dragMode = !dragMode;
+    $("#hudDragModeBtn").classList.toggle("active", dragMode);
+    canvas.style.cursor = dragMode ? "move" : "default";
+    showToast(
+      dragMode
+        ? L(
+            "Modo Mover Peça ativo: arraste qualquer peça com o mouse sobre a mesa!",
+            "Move Part active: drag any part across the build plate!"
+          )
+        : L("Modo Rotação de Câmera 3D restaurado.", "3D Camera Orbit mode restored.")
+    );
+  };
+
+  function dropSelectedToBed() {
     if (!selectedSolid) return;
+    selectedSolid.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(selectedSolid);
     selectedSolid.position.y -= box.min.y;
     renderInspectorFields();
     updateTelemetryAndPrintMetrics();
+    syncMcpConsole();
     showToast(L("Peça assentada na mesa (Z = 0 mm)!", "Part dropped to build plate (Z = 0 mm)!"));
-  };
+  }
+
+  function rotateSelected90(axis) {
+    if (!selectedSolid) return;
+    pushUndoSnapshot();
+    const stepRad = Math.PI / 2;
+    if (axis === "x") selectedSolid.rotation.x += stepRad;
+    else if (axis === "y") selectedSolid.rotation.z += stepRad;
+    else if (axis === "z") selectedSolid.rotation.y += stepRad;
+    dropSelectedToBed();
+  }
+
+  $("#hudZoomFit").onclick = zoomFitScene;
+  $("#hudDropBed").onclick = dropSelectedToBed;
+  $("#btnLayFlatBed").onclick = dropSelectedToBed;
+  $("#btnRotX90").onclick = () => rotateSelected90("x");
+  $("#btnRotY90").onclick = () => rotateSelected90("y");
+  $("#btnRotZ90").onclick = () => rotateSelected90("z");
+
   $("#hudCenterBed").onclick = () => {
     if (!selectedSolid) return;
     selectedSolid.position.x = 0;
     selectedSolid.position.z = 0;
     renderInspectorFields();
     updateTelemetryAndPrintMetrics();
+    syncMcpConsole();
   };
   $$("[data-style]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1786,10 +1899,23 @@
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
 
-  // Boot Studio with the SolidCraft-inspired Space Rover Demo!
+  // Boot Studio: restore from localStorage Auto-Save if available, else Space Rover Demo
   onResize();
   applyLanguage();
-  loadDemoProject("rover");
+  try {
+    const savedRaw = localStorage.getItem("3dcad_autosave_v1");
+    const savedItems = savedRaw ? JSON.parse(savedRaw) : null;
+    if (Array.isArray(savedItems) && savedItems.length > 0) {
+      restoreSceneFromItems(savedItems);
+      zoomFitScene();
+    } else {
+      loadDemoProject("rover");
+    }
+  } catch {
+    loadDemoProject("rover");
+  }
+  isBooting = false;
+  saveAutoSave();
   undoStack = [];
   animate();
 })();
