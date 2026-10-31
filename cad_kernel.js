@@ -126,6 +126,7 @@
     buildRevolve: (profiles, params, options) => sendRequest("buildRevolve", { profiles, params, options }),
     buildLoft: (profileSketches, params, options) => sendRequest("buildLoft", { profileSketches, params, options }),
     buildSweep: (profile, spine, params, options) => sendRequest("buildSweep", { profile, spine, params, options }),
+    applyEdgeFinish: (operation, params, shapeData, options) => sendRequest("applyEdgeFinish", { operation, params, shapeData, options }),
     recomputeHistory: (features, step) => sendRequest("recomputeHistory", { features, step }),
     exportSTEP: (features, name, color) => sendRequest("exportSTEP", { features, name, color }),
     importSTEP: (arrayBuffer) => sendRequest("importSTEP", { arrayBuffer }),

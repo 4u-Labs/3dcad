@@ -140,17 +140,75 @@ self.onmessage = async function (e) {
         break;
       }
 
+      case "applyEdgeFinish": {
+        const rep = self.CadExactEngine.getReplicad();
+        const { operation, params, shapeData } = payload;
+        let solid = null;
+        const p = shapeData?.params || {};
+        const t = shapeData?.type || "BOX";
+        if (t === "BOX") solid = self.CadExactEngine.makeExactBox(rep, p);
+        else if (t === "CYLINDER") solid = self.CadExactEngine.makeExactCylinder(rep, p);
+        else if (t === "SPHERE") solid = self.CadExactEngine.makeExactSphere(rep, p);
+        else if (t === "CONE") solid = self.CadExactEngine.makeExactCone(rep, p);
+        else if (t === "TORUS") solid = self.CadExactEngine.makeExactTorus(rep, p);
+        else solid = self.CadExactEngine.makeExactBox(rep, p);
+
+        let finished = null;
+        if (operation === "fillet") {
+          finished = self.CadExactEngine.applyFillet(solid, params?.radius || 2);
+        } else if (operation === "chamfer") {
+          finished = self.CadExactEngine.applyChamfer(solid, params?.distance || 1.5);
+        } else if (operation === "shell") {
+          finished = self.CadExactEngine.applyShell(solid, params?.thickness || 2);
+        }
+
+        if (finished) {
+          const meshData = self.CadExactEngine.meshBRepSolid(finished, payload.options);
+          finished.delete();
+          solid.delete();
+          self.postMessage({ id, success: true, action, result: meshData });
+        } else {
+          solid.delete();
+          throw new Error("Edge finish operation failed");
+        }
+        break;
+      }
+
       case "exportSTEP": {
-        // Build solids from current features and export true analytic STEP
-        historyGraph.setFeatures(payload.features);
-        const out = historyGraph.recompute();
+        const rep = self.CadExactEngine.getReplicad();
         const validShapes = [];
-        if (out.activeSolid) {
-          validShapes.push({ shape: out.activeSolid, name: payload.name || "Part", color: payload.color || "#f97316" });
+        const features = payload.features || [];
+        for (let i = 0; i < features.length; i++) {
+          const feat = features[i];
+          try {
+            let solid = null;
+            if (feat.type === "BOX") solid = self.CadExactEngine.makeExactBox(rep, feat.params);
+            else if (feat.type === "CYLINDER") solid = self.CadExactEngine.makeExactCylinder(rep, feat.params);
+            else if (feat.type === "SPHERE") solid = self.CadExactEngine.makeExactSphere(rep, feat.params);
+            else if (feat.type === "CONE") solid = self.CadExactEngine.makeExactCone(rep, feat.params);
+            else if (feat.type === "TORUS") solid = self.CadExactEngine.makeExactTorus(rep, feat.params);
+            else if (feat.type === "EXTRUDE") solid = self.CadExactEngine.makeExactExtrude(rep, feat.profiles, feat.params);
+            else if (feat.type === "REVOLVE") solid = self.CadExactEngine.makeExactRevolve(rep, feat.profiles, feat.params);
+            if (solid) {
+              validShapes.push({
+                shape: solid,
+                name: feat.name || `Solid_${i + 1}`,
+                color: feat.color || "#f97316"
+              });
+            }
+          } catch {}
+        }
+        if (!validShapes.length) {
+          historyGraph.setFeatures(payload.features);
+          const out = historyGraph.recompute();
+          if (out.activeSolid) {
+            validShapes.push({ shape: out.activeSolid, name: payload.name || "Part", color: payload.color || "#f97316" });
+          }
         }
         if (!validShapes.length) throw new Error("No active BRep solid to export");
         const blob = self.CadExactEngine.exportExactSTEP(validShapes);
         const arrayBuf = await blob.arrayBuffer();
+        validShapes.forEach(s => s.shape.delete());
         self.postMessage({ id, success: true, action, result: { arrayBuffer: arrayBuf } }, [arrayBuf]);
         break;
       }

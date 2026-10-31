@@ -346,8 +346,9 @@
           break;
         }
         case "horizontal": {
-          if (c.line) {
-            const ln = ctx.getLineEnds(c.line, xVec);
+          const lId = c.line || c.entity;
+          if (lId) {
+            const ln = ctx.getLineEnds(lId, xVec);
             if (ln) push(ln.b.y - ln.a.y, cid);
           } else if (c.p1 && c.p2) {
             const a = ctx.getPointXY(c.p1, xVec);
@@ -357,8 +358,9 @@
           break;
         }
         case "vertical": {
-          if (c.line) {
-            const ln = ctx.getLineEnds(c.line, xVec);
+          const lId = c.line || c.entity;
+          if (lId) {
+            const ln = ctx.getLineEnds(lId, xVec);
             if (ln) push(ln.b.x - ln.a.x, cid);
           } else if (c.p1 && c.p2) {
             const a = ctx.getPointXY(c.p1, xVec);

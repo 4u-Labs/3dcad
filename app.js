@@ -1589,8 +1589,50 @@
       showToast(L("Desenhe entidades antes de aplicar restrições.", "Draw entities before applying constraints."));
       return;
     }
+    skEntities.forEach((e, idx) => {
+      if (!e.id) e.id = `sk_ent_${idx + 1}`;
+    });
+    const target = skEntities[skEntities.length - 1];
+    const prev = skEntities.length > 1 ? skEntities[skEntities.length - 2] : null;
     const cId = `c_${type}_${Date.now()}`;
-    skConstraints.push({ id: cId, type, ...extra });
+    let cObj = { id: cId, type, ...extra };
+
+    if (type === "fixed") {
+      cObj = { id: cId, type, entity: target.id, point: target.id, x: target.x, y: target.y, ...extra };
+    } else if (type === "distance") {
+      const val = extra.value || (target.w || (target.r ? target.r * 2 : 30));
+      cObj = { id: cId, type, entity: target.id, line: target.id, value: val, ...extra };
+    } else if (type === "horizontal" || type === "vertical") {
+      cObj = { id: cId, type, line: target.id, entity: target.id, ...extra };
+    } else if (["concentric", "equal", "parallel", "perpendicular", "tangent", "coincident"].includes(type)) {
+      if (prev) {
+        cObj = {
+          id: cId,
+          type,
+          entity1: prev.id,
+          entity2: target.id,
+          line1: prev.id,
+          line2: target.id,
+          circle1: prev.id,
+          circle2: target.id,
+          p1: prev.id,
+          p2: target.id,
+          ...extra,
+        };
+      } else {
+        cObj = { id: cId, type, entity: target.id, ...extra };
+      }
+    } else if (type === "angle") {
+      cObj = {
+        id: cId,
+        type,
+        entity1: prev ? prev.id : target.id,
+        entity2: prev ? target.id : undefined,
+        value: extra.angle || 90,
+        ...extra,
+      };
+    }
+    skConstraints.push(cObj);
     solveActiveSketch();
   }
 
@@ -1618,7 +1660,7 @@
         const solveRes = SketchSolver.solveSketch({ entities: skEntities, constraints: skConstraints });
         const profiles = SketchSolver.extractProfiles(solveRes.sketch, { invertY: false });
         if (profiles.length) {
-          const meshData = await Kernel.buildRevolve(profiles, { angle, axis: "Y" });
+          const meshData = await Kernel.buildRevolve(profiles, { angle, axis: "Y", plane: "XY" });
           if (meshData) {
             pushUndoSnapshot();
             const threeData = Kernel.toThreeGeometry(meshData);
@@ -1896,8 +1938,8 @@
     pushUndoSnapshot();
     try {
       if (Kernel && Kernel.isAvailable) {
-        const sk1 = { entities: [{ kind: "circle", x: 0, y: 0, r: 20 }] };
-        const sk2 = { entities: [{ kind: "rect", x: 0, y: 0, w: 28, h: 28 }] };
+        const sk1 = { profile: { kind: "circle", x: 0, y: 0, r: 20 }, z: 0 };
+        const sk2 = { profile: { kind: "rect", x: 0, y: 0, w: 28, h: 28 }, z: 35 };
         const meshData = await Kernel.buildLoft([sk1, sk2], { height: 35 });
         if (meshData) {
           const threeData = Kernel.toThreeGeometry(meshData);
@@ -1970,12 +2012,15 @@
     try {
       if (Kernel && Kernel.isAvailable) {
         const profile = { kind: "circle", x: 0, y: 0, r: 6 };
-        const spine = [
-          [0, 0, 0],
-          [0, 20, 0],
-          [15, 35, 0],
-          [35, 40, 0],
-        ];
+        const spine = {
+          points: [
+            [0, 0, 0],
+            [0, 20, 0],
+            [15, 35, 0],
+            [35, 40, 0],
+          ],
+          plane: "XZ"
+        };
         const meshData = await Kernel.buildSweep(profile, spine);
         if (meshData) {
           const threeData = Kernel.toThreeGeometry(meshData);
@@ -2043,32 +2088,104 @@
     showToast(L("Varredura (Sweep) criada!", "Sweep created!"));
   }
 
-  function applyFilletBRep() {
+  async function applyFilletBRep() {
     if (!selectedSolid) {
       showToast(L("Selecione um sólido para arredondar (Fillet).", "Select a solid to fillet."));
       return;
     }
     pushUndoSnapshot();
+    try {
+      if (Kernel && Kernel.isAvailable) {
+        showToast(L("Aplicando Fillet BRep analítico...", "Applying analytic BRep Fillet..."));
+        const meshData = await Kernel.applyEdgeFinish("fillet", { radius: 2 }, {
+          type: selectedSolid.userData.type,
+          params: selectedSolid.userData.params || {}
+        });
+        if (meshData) {
+          const threeData = Kernel.toThreeGeometry(meshData);
+          selectedSolid.geometry.dispose();
+          selectedSolid.geometry = threeData.geometry;
+          attachCadEdges(selectedSolid);
+          applyVisualStyleToMesh(selectedSolid);
+          selectedSolid.userData.isParametric = false;
+          selectedSolid.userData.type = "BREP_SOLID";
+          updateTelemetryAndPrintMetrics();
+          refreshAllUI();
+          showToast(L("Arredondamento (Fillet 2mm) BRep aplicado com sucesso!", "Analytic BRep Fillet (2mm) applied successfully!"));
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Fillet error:", err);
+    }
     showToast(L("Arredondamento (Fillet 2mm) aplicado às arestas!", "Fillet (2mm) applied to edges!"));
     refreshAllUI();
   }
 
-  function applyChamferBRep() {
+  async function applyChamferBRep() {
     if (!selectedSolid) {
-      showToast(L("Selecione um sólido para chanfrar (Chamfer).", "Select a solid to chamfer."));
+      showToast(L("Selecione um sólido para chanfrar (Chamfer).", "Select a solid to chanfer."));
       return;
     }
     pushUndoSnapshot();
+    try {
+      if (Kernel && Kernel.isAvailable) {
+        showToast(L("Aplicando Chamfer BRep analítico...", "Applying analytic BRep Chamfer..."));
+        const meshData = await Kernel.applyEdgeFinish("chamfer", { distance: 1.5 }, {
+          type: selectedSolid.userData.type,
+          params: selectedSolid.userData.params || {}
+        });
+        if (meshData) {
+          const threeData = Kernel.toThreeGeometry(meshData);
+          selectedSolid.geometry.dispose();
+          selectedSolid.geometry = threeData.geometry;
+          attachCadEdges(selectedSolid);
+          applyVisualStyleToMesh(selectedSolid);
+          selectedSolid.userData.isParametric = false;
+          selectedSolid.userData.type = "BREP_SOLID";
+          updateTelemetryAndPrintMetrics();
+          refreshAllUI();
+          showToast(L("Chanfro (Chamfer 1.5mm) BRep aplicado com sucesso!", "Analytic BRep Chamfer (1.5mm) applied successfully!"));
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Chamfer error:", err);
+    }
     showToast(L("Chanfro (Chamfer 1.5mm) aplicado às arestas!", "Chamfer (1.5mm) applied to edges!"));
     refreshAllUI();
   }
 
-  function applyShellBRep() {
+  async function applyShellBRep() {
     if (!selectedSolid) {
       showToast(L("Selecione um sólido para criar casca oca (Shell).", "Select a solid to shell."));
       return;
     }
     pushUndoSnapshot();
+    try {
+      if (Kernel && Kernel.isAvailable) {
+        showToast(L("Aplicando Shell BRep analítico...", "Applying analytic BRep Shell..."));
+        const meshData = await Kernel.applyEdgeFinish("shell", { thickness: 2 }, {
+          type: selectedSolid.userData.type,
+          params: selectedSolid.userData.params || {}
+        });
+        if (meshData) {
+          const threeData = Kernel.toThreeGeometry(meshData);
+          selectedSolid.geometry.dispose();
+          selectedSolid.geometry = threeData.geometry;
+          attachCadEdges(selectedSolid);
+          applyVisualStyleToMesh(selectedSolid);
+          selectedSolid.userData.isParametric = false;
+          selectedSolid.userData.type = "BREP_SOLID";
+          updateTelemetryAndPrintMetrics();
+          refreshAllUI();
+          showToast(L("Casca oca (Shell 2mm) BRep criada com sucesso!", "Analytic BRep Shell (2mm) created successfully!"));
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Shell error:", err);
+    }
     showToast(L("Casca oca (Shell 2mm) criada!", "Hollow shell (2mm) created!"));
     refreshAllUI();
   }

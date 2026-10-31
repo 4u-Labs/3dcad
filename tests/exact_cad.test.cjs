@@ -130,3 +130,47 @@ test("CadExactEngine: STEP interchange exports and imports true analytic BRep", 
   filleted.delete();
   importedShape.delete();
 });
+
+test("CadExactEngine: Loft and Sweep generate smooth analytic BRep solids", () => {
+  // Loft from circle to rectangle across heights
+  const loftSolid = CadExactEngine.makeExactLoft(
+    replicad,
+    [
+      { entities: [{ kind: "circle", x: 0, y: 0, r: 20 }] },
+      { entities: [{ kind: "rect", x: 0, y: 0, w: 28, h: 28 }] },
+    ],
+    { height: 35 }
+  );
+  assert.ok(loftSolid);
+  const loftVol = replicad.measureVolume(loftSolid);
+  assert.ok(loftVol > 30000 && loftVol < 40000, `Expected loft volume ~35500, got ${loftVol}`);
+  loftSolid.delete();
+
+  // Sweep circle along 3D spine
+  const sweepSolid = CadExactEngine.makeExactSweep(
+    replicad,
+    { kind: "circle", x: 0, y: 0, r: 6 },
+    [
+      [0, 0, 0],
+      [0, 20, 0],
+      [15, 35, 0],
+      [35, 40, 0],
+    ]
+  );
+  assert.ok(sweepSolid);
+  const sweepVol = replicad.measureVolume(sweepSolid);
+  assert.ok(sweepVol > 6000 && sweepVol < 8000, `Expected sweep volume ~7000, got ${sweepVol}`);
+  sweepSolid.delete();
+});
+
+test("CadExactEngine: Revolve handles centered and offset profiles cleanly", () => {
+  const CadSketchSolver = require("../cad_sketch_solver.js");
+  const centeredSk = { entities: [{ kind: "rect", x: 0, y: 0, w: 30, h: 20 }], constraints: [] };
+  const profiles = CadSketchSolver.extractProfiles(CadSketchSolver.solveSketch(centeredSk).sketch, { invertY: false });
+  const revSolid = CadExactEngine.makeExactRevolve(replicad, profiles, { angle: 360, axis: "Y" });
+  assert.ok(revSolid);
+  const revVol = replicad.measureVolume(revSolid);
+  assert.ok(revVol > 50000, `Expected revolve volume ~56548, got ${revVol}`);
+  revSolid.delete();
+});
+

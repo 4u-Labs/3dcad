@@ -156,46 +156,60 @@
         if (j.bodyB) childToJoint.set(j.bodyB, j);
       }
 
-      // Solve recursively
+      // Solve recursively with cycle protection
       const solved = new Set();
+      const visiting = new Set();
+
       const applyJoint = (j) => {
-        if (!j || solved.has(j.id)) return;
+        if (!j || solved.has(j.id) || visiting.has(j.id)) return;
+        visiting.add(j.id);
+
         if (j.bodyA && childToJoint.has(j.bodyA)) {
           applyJoint(childToJoint.get(j.bodyA));
         }
 
         const parentRecord = this.bodies.get(j.bodyA);
         const childRecord = this.bodies.get(j.bodyB);
-        if (!childRecord || !childRecord.mesh) return;
+        if (!childRecord || !childRecord.mesh) {
+          visiting.delete(j.id);
+          return;
+        }
 
         const childMesh = childRecord.mesh;
-        const parentMesh = parentRecord?.mesh || null;
+        const parentMesh = parentRecord?.mesh;
 
-        const anchorVec = new THREE.Vector3(...j.anchor);
-        const axisVec = new THREE.Vector3(...j.axis).normalize();
+        const axisVec = new THREE.Vector3(...(j.axis || [0, 0, 1])).normalize();
+        const anchorVec = new THREE.Vector3(...(j.anchor || [0, 0, 0]));
 
-        if (j.type === "revolute") {
+        let jointMat = new THREE.Matrix4();
+        if (j.type === "revolute" || j.type === "ball") {
           const angleRad = toRad(j.value);
           const rotQuat = new THREE.Quaternion().setFromAxisAngle(axisVec, angleRad);
-
-          // Rotate childMesh around anchor
-          childMesh.position.sub(anchorVec);
-          childMesh.position.applyQuaternion(rotQuat);
-          childMesh.position.add(anchorVec);
-          childMesh.quaternion.multiplyQuaternions(rotQuat, childMesh.quaternion);
+          jointMat = new THREE.Matrix4().makeTranslation(anchorVec.x, anchorVec.y, anchorVec.z)
+            .multiply(new THREE.Matrix4().makeRotationFromQuaternion(rotQuat))
+            .multiply(new THREE.Matrix4().makeTranslation(-anchorVec.x, -anchorVec.y, -anchorVec.z));
         } else if (j.type === "slider") {
           const moveVec = axisVec.clone().multiplyScalar(j.value);
-          childMesh.position.add(moveVec);
+          jointMat = new THREE.Matrix4().makeTranslation(moveVec.x, moveVec.y, moveVec.z);
         }
 
-        // If parent has moved or rotated from its own parent joints, compound with parent world transform
-        if (parentMesh && parentRecord) {
-          const parentDeltaPos = parentMesh.position.clone().sub(parentRecord.basePos);
-          childMesh.position.add(parentDeltaPos);
+        const childBaseMat = new THREE.Matrix4().compose(childRecord.basePos, childRecord.baseQuaternion, childRecord.baseScale);
+        let childWorldMat;
+        if (parentRecord && parentMesh) {
+          const parentBaseMat = new THREE.Matrix4().compose(parentRecord.basePos, parentRecord.baseQuaternion, parentRecord.baseScale);
+          const parentBaseInv = parentBaseMat.clone().invert();
+          const relBaseMat = new THREE.Matrix4().multiplyMatrices(parentBaseInv, childBaseMat);
+          const parentCurrentMat = new THREE.Matrix4().compose(parentMesh.position, parentMesh.quaternion, parentMesh.scale);
+          childWorldMat = parentCurrentMat.clone().multiply(jointMat).multiply(relBaseMat);
+        } else {
+          childWorldMat = jointMat.clone().multiply(childBaseMat);
         }
 
+        childWorldMat.decompose(childMesh.position, childMesh.quaternion, childMesh.scale);
         childMesh.updateMatrix();
         childMesh.updateMatrixWorld(true);
+
+        visiting.delete(j.id);
         solved.add(j.id);
       };
 

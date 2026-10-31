@@ -69,7 +69,7 @@
     const holes = profile.holes || [];
 
     function buildLoopDrawing(loop) {
-      if (!loop) return rep.drawRectangle(20, 20);
+      if (!loop) throw new Error("Perfil de laço nulo ou inexistente");
       if (loop.kind === "circle") {
         return rep.drawCircle(loop.r).translate([loop.x ?? loop.cx ?? 0, loop.y ?? loop.cy ?? 0]);
       }
@@ -77,13 +77,16 @@
         return rep.drawRectangle(loop.w, loop.h).translate([loop.x ?? loop.cx ?? 0, loop.y ?? loop.cy ?? 0]);
       }
       if (loop.kind === "slot") {
-        const half = Math.max(0.01, loop.w * 0.5 - loop.h * 0.5);
-        const rad = loop.h * 0.5;
-        let pen = rep.draw([(loop.x ?? loop.cx ?? 0) - half, (loop.y ?? loop.cy ?? 0) - rad]);
-        pen = pen.lineTo([(loop.x ?? loop.cx ?? 0) + half, (loop.y ?? loop.cy ?? 0) - rad]);
-        pen = pen.halfEllipseTo([(loop.x ?? loop.cx ?? 0) + half, (loop.y ?? loop.cy ?? 0) + rad], rad);
-        pen = pen.lineTo([(loop.x ?? loop.cx ?? 0) - half, (loop.y ?? loop.cy ?? 0) + rad]);
-        pen = pen.halfEllipseTo([(loop.x ?? loop.cx ?? 0) - half, (loop.y ?? loop.cy ?? 0) - rad], rad);
+        const len = Math.max(2, Number(loop.w) || 30);
+        const rad = Math.max(0.5, (Number(loop.h) || 12) * 0.5);
+        const half = Math.max(0.01, len * 0.5 - rad);
+        const cx = loop.x ?? loop.cx ?? 0;
+        const cy = loop.y ?? loop.cy ?? 0;
+        let pen = rep.draw([cx - half, cy - rad]);
+        pen = pen.lineTo([cx + half, cy - rad]);
+        pen = pen.threePointsArcTo([cx + half, cy + rad], [cx + half + rad, cy]);
+        pen = pen.lineTo([cx - half, cy + rad]);
+        pen = pen.threePointsArcTo([cx - half, cy - rad], [cx - half - rad, cy]);
         return pen.close();
       }
 
@@ -96,7 +99,7 @@
           for (let i = 1; i < loop.samples.length; i++) pen = pen.lineTo(loop.samples[i]);
           return pen.close();
         }
-        return rep.drawRectangle(20, 20);
+        throw new Error("Perfil de esboço sem segmentos ou amostras válidas");
       }
 
       const firstSeg = segs[0];
@@ -239,17 +242,37 @@
 
   function makeExactRevolve(rep, profiles, params = {}) {
     const angle = Math.min(360, Math.max(1, Number(params.angle) || 360));
-    const axis = params.axis || "Z";
+    const axis = params.axis || "Y";
     const origin = params.origin || [0, 0, 0];
-    const plane = params.plane || "XZ";
+    const plane = params.plane || (axis === "Z" ? "XZ" : "XY");
     const solids = [];
     const revAxis = axis === "X" ? [1, 0, 0] : axis === "Y" ? [0, 1, 0] : [0, 0, 1];
     for (const prof of profiles) {
-      const bp = buildBlueprintFromProfile(rep, prof);
+      let bp = buildBlueprintFromProfile(rep, prof);
+      if (bp && bp.boundingBox) {
+        const bounds = bp.boundingBox.bounds;
+        if (bounds && bounds.length === 2) {
+          const [minPt, maxPt] = bounds;
+          if (axis === "Y" || axis === "Z") {
+            const minX = minPt[0];
+            const maxX = maxPt[0];
+            if (minX < -1e-4 && maxX > 1e-4) {
+              bp = bp.translate([-minX, 0]);
+            }
+          } else if (axis === "X") {
+            const minY = minPt[1];
+            const maxY = maxPt[1];
+            if (minY < -1e-4 && maxY > 1e-4) {
+              bp = bp.translate([0, -minY]);
+            }
+          }
+        }
+      }
       const sk = bp.sketchOnPlane(plane);
       const solid = sk.revolve(revAxis, { origin, angle });
       solids.push(solid);
     }
+    if (!solids.length) throw new Error("Nenhum perfil válido para revolução");
     if (solids.length === 1) return solids[0];
     let res = solids[0];
     for (let i = 1; i < solids.length; i++) {
@@ -266,9 +289,15 @@
       throw new Error("Loft requires at least 2 cross-section profiles across planes");
     }
     const sketches = [];
-    for (const spec of profileSketches) {
-      const bp = buildBlueprintFromProfile(rep, spec.profile);
-      const origin = spec.origin || [0, 0, spec.z || 0];
+    const total = profileSketches.length;
+    const totalHeight = Math.max(1, Number(params.height) || 35);
+    for (let i = 0; i < total; i++) {
+      const spec = profileSketches[i];
+      const prof = spec.profile || (spec.entities ? (spec.entities[0] || null) : spec);
+      if (!prof) throw new Error("Loft profile section cannot be empty");
+      const bp = buildBlueprintFromProfile(rep, prof);
+      const zOffset = spec.z !== undefined ? Number(spec.z) : (spec.origin ? Number(spec.origin[2]) : (i / Math.max(1, total - 1)) * totalHeight);
+      const origin = spec.origin || [0, 0, zOffset];
       const plane = spec.plane || "XY";
       sketches.push(bp.sketchOnPlane(plane, origin));
     }
@@ -281,20 +310,37 @@
   function makeExactSweep(rep, profile, spineSpec = {}, params = {}) {
     const bp = buildBlueprintFromProfile(rep, profile);
     let spineWire;
-    if (spineSpec.kind === "helix") {
+    const points = Array.isArray(spineSpec) ? spineSpec : spineSpec?.points;
+    if (spineSpec && spineSpec.kind === "helix") {
       const pitch = Math.max(1, Number(spineSpec.pitch) || 10);
       const height = Math.max(1, Number(spineSpec.height) || 40);
       const radius = Math.max(1, Number(spineSpec.radius) || 15);
       spineWire = rep.sketchHelix(pitch, height, radius).wire;
-    } else if (spineSpec.points && spineSpec.points.length >= 2) {
-      let pen = rep.draw(spineSpec.points[0]);
-      for (let i = 1; i < spineSpec.points.length; i++) pen = pen.lineTo(spineSpec.points[i]);
-      spineWire = pen.sketchOnPlane(spineSpec.plane || "XZ").wire;
+    } else if (points && points.length >= 2) {
+      const plane = (spineSpec && spineSpec.plane) || params.spinePlane || "XY";
+      const to2D = (p) => {
+        if (!Array.isArray(p)) return [0, 0];
+        if (plane === "XZ") return [Number(p[0]) || 0, Number(p[2] !== undefined ? p[2] : p[1]) || 0];
+        return [Number(p[0]) || 0, Number(p[1]) || 0];
+      };
+      const p0 = to2D(points[0]);
+      let pen = rep.draw(p0);
+      let lastP = p0;
+      for (let i = 1; i < points.length; i++) {
+        const pt = to2D(points[i]);
+        if (Math.hypot(pt[0] - lastP[0], pt[1] - lastP[1]) > 1e-4) {
+          pen = pen.lineTo(pt);
+          lastP = pt;
+        }
+      }
+      const spineDrawing = pen.done();
+      spineWire = spineDrawing.sketchOnPlane(plane).wire;
     } else {
       spineWire = rep.sketchHelix(12, 36, 16).wire;
     }
 
-    const profileWire = bp.sketchOnPlane(params.plane || "XY").wire;
+    const profPlane = params.plane || ((spineSpec?.plane === "XY" || !spineSpec?.plane) ? "XZ" : "XY");
+    const profileWire = bp.sketchOnPlane(profPlane).wire;
     const swept = rep.genericSweep(profileWire, spineWire, {});
     safeDelete(spineWire);
     safeDelete(profileWire);
@@ -334,7 +380,7 @@
    */
   function meshBRepSolid(solid, options = {}) {
     const tolerance = Number(options.tolerance) || 0.05;
-    const angularTolerance = Number(options.angularTolerance) || 15;
+    const angularTolerance = Number(options.angularTolerance) || 0.15;
     const mesh = solid.mesh({ tolerance, angularTolerance });
     let edgeLines = [];
     try {
@@ -495,18 +541,18 @@
               nextSolid = makeExactSweep(rep, feat.profile, feat.spine, feat.params);
               break;
             case "FILLET": {
-              const target = currentActiveSolid || makeExactBox(rep);
-              nextSolid = applyFillet(target, feat.params?.radius || 2);
+              if (!currentActiveSolid) throw new Error("Nenhum sólido ativo para aplicar Fillet");
+              nextSolid = applyFillet(currentActiveSolid, feat.params?.radius || 2);
               break;
             }
             case "CHAMFER": {
-              const target = currentActiveSolid || makeExactBox(rep);
-              nextSolid = applyChamfer(target, feat.params?.distance || 1.5);
+              if (!currentActiveSolid) throw new Error("Nenhum sólido ativo para aplicar Chamfer");
+              nextSolid = applyChamfer(currentActiveSolid, feat.params?.distance || 1.5);
               break;
             }
             case "SHELL": {
-              const target = currentActiveSolid || makeExactBox(rep);
-              nextSolid = applyShell(target, feat.params?.thickness || 2);
+              if (!currentActiveSolid) throw new Error("Nenhum sólido ativo para aplicar Shell");
+              nextSolid = applyShell(currentActiveSolid, feat.params?.thickness || 2);
               break;
             }
             case "BOOLEAN_CUT": {

@@ -103,3 +103,22 @@ test("CadAssembly.AssemblyManager: slider joint translation clamps between min/m
   slider.setValue(-50);
   assert.equal(slider.value, 0);
 });
+
+test("CadAssembly.AssemblyManager: handles kinematic chains and prevents cyclic deadlocks", () => {
+  const manager = new CadAssembly.AssemblyManager();
+  const bodyA = createMockThreeMesh([0, 0, 0]);
+  const bodyB = createMockThreeMesh([10, 0, 0]);
+
+  manager.registerBody("bodyA", "Body A", bodyA);
+  manager.registerBody("bodyB", "Body B", bodyB);
+
+  // Add cyclic joints A -> B and B -> A
+  manager.addJoint({ id: "j1", bodyA: "bodyA", bodyB: "bodyB", type: "revolute", axis: [0, 0, 1] });
+  manager.addJoint({ id: "j2", bodyA: "bodyB", bodyB: "bodyA", type: "revolute", axis: [0, 0, 1] });
+
+  // Must not throw or recurse infinitely
+  assert.doesNotThrow(() => {
+    manager.evaluateKinematics();
+  });
+});
+

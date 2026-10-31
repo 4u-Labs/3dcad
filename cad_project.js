@@ -2,7 +2,7 @@
 (function(root){
   "use strict";
   const FORMAT="3dcad-project", VERSION=2, MAX_BYTES=32*1024*1024, MAX_SOLIDS=150;
-  const MESH_TYPES=new Set(["CSG_SOLID","STL_IMPORT","MESH"]);
+  const MESH_TYPES=new Set(["CSG_SOLID","STL_IMPORT","MESH","REVOLVE_SOLID","LOFT_SOLID","SWEEP_SOLID","BREP_SOLID"]);
   const fail=(pt,en)=>{throw new Error(`${pt} / ${en}`);};
   const copy=value=>JSON.parse(JSON.stringify(value));
   function finite(n,min=-100000,max=100000){return typeof n==="number"&&Number.isFinite(n)&&n>=min&&n<=max;}
