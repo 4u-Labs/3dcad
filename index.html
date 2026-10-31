@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>3DCad Studio — CAD 3D Paramétrico, Impressão 3D &amp; IA (MCP) | 4u-Labs</title>
+    <meta
+      name="description"
+      content="Estúdio CAD 3D paramétrico open-source no navegador: Sketch 2D, Extrusão, Engrenagens, Suportes, CSG Booleano, Análise de Impressão 3D, Copiloto IA (MCP) e exportação STL, 3MF, STEP e OBJ."
+    />
+    <meta name="theme-color" content="#0d1118" />
+    <link rel="canonical" href="https://4u.ia.br/app/3dcad/" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
+    <link rel="icon" href="favicon.ico" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <link rel="manifest" href="manifest.json" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="3DCad Studio — CAD 3D Paramétrico, Impressão 3D &amp; IA (MCP)" />
+    <meta
+      property="og:description"
+      content="Modele peças técnicas para impressão 3D com parâmetros em milímetros, engrenagens, suportes, operações booleanas, estimador de filamento e Copiloto IA (MCP)."
+    />
+    <meta property="og:url" content="https://4u.ia.br/app/3dcad/" />
+    <meta property="og:image" content="https://4u.ia.br/app/3dcad/og-banner.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="3DCad Studio — CAD 3D Paramétrico &amp; Impressão 3D" />
+    <meta
+      name="twitter:description"
+      content="Do FreeCAD ao SolidCraft no navegador: CAD 3D paramétrico com IA (MCP) e exportação STL, 3MF, STEP e OBJ por 4u-Labs."
+    />
+    <meta name="twitter:image" content="https://4u.ia.br/app/3dcad/og-banner.jpg" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "3DCad Studio",
+        "url": "https://4u.ia.br/app/3dcad/",
+        "image": "https://4u.ia.br/app/3dcad/og-banner.jpg",
+        "description": "Estúdio CAD 3D paramétrico open-source no navegador com Sketch 2D, Extrusão, CSG, Geradores Mecânicos, Análise de Impressão 3D e Copiloto IA (MCP).",
+        "applicationCategory": "DesignApplication",
+        "operatingSystem": "All",
+        "isAccessibleForFree": true,
+        "inLanguage": ["pt-BR", "en"],
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "BRL" },
+        "author": { "@type": "Organization", "name": "4u-Labs", "url": "https://4u.ia.br/" }
+      }
+    </script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- TOP HEADER -->
+      <header class="top-header">
+        <div class="brand-group">
+          <img src="icon-192.png" alt="3DCad" class="brand-logo" width="28" height="28" />
+          <div class="brand-title">
+            <strong>
+              <span>3DCad Studio</span>
+              <span class="badge-rust">Parametric + MCP</span>
+            </strong>
+            <small data-i18n="subtitle">CAD 3D Paramétrico &amp; Impressão 3D · 4u-Labs</small>
+          </div>
+        </div>
+
+        <nav class="workspace-tabs" aria-label="Workspaces">
+          <button type="button" class="ws-tab active" data-ws="model" data-i18n="wsModel">
+            Modelar 3D
+          </button>
+          <button type="button" class="ws-tab" data-ws="sketch" data-i18n="wsSketch">
+            Esboço 2D
+          </button>
+          <button type="button" class="ws-tab" data-ws="mech" data-i18n="wsMech">
+            Peças &amp; Engrenagens
+          </button>
+          <button type="button" class="ws-tab" data-ws="print" data-i18n="wsPrint">
+            Impressão 3D
+          </button>
+          <button type="button" class="ws-tab" data-ws="ai" data-i18n="wsAi">
+            🤖 Copiloto IA (MCP)
+          </button>
+        </nav>
+
+        <div class="header-actions">
+          <button type="button" class="hdr-btn" id="btnUndo" title="Ctrl+Z">
+            ↶ <span data-i18n="undo">Desfazer</span>
+          </button>
+          <button type="button" class="hdr-btn" id="btnRedo" title="Ctrl+Y">
+            ↷ <span data-i18n="redo">Refazer</span>
+          </button>
+          <label class="hdr-btn" title="Importar STL ou Projeto JSON">
+            📂 <span data-i18n="importBtn">Importar STL/JSON</span>
+            <input type="file" id="fileImportInput" accept=".stl,.json" hidden />
+          </label>
+          <button type="button" class="hdr-btn primary" id="btnQuickExportStl">
+            ⬇ <span data-i18n="exportStl">Exportar .STL</span>
+          </button>
+          <div class="lang-switch" role="group" aria-label="Idioma / Language">
+            <button type="button" id="langPt" class="active">PT</button>
+            <button type="button" id="langEn">EN</button>
+          </div>
+          <button type="button" class="hdr-btn eco-btn" id="btnOpen4uModal">
+            ✦ 4u-Labs
+          </button>
+        </div>
+      </header>
+
+      <!-- CONTEXTUAL RIBBON TOOLBAR -->
+      <section class="ribbon-bar" aria-label="Ferramentas CAD">
+        <!-- Sketch 2D -->
+        <div class="ribbon-group">
+          <div class="ribbon-btns">
+            <button type="button" class="tool-btn cyan-accent" id="btnOpenSketch">
+              <span class="ico">📐</span>
+              <span class="lbl" data-i18n="rbSketch">Esboço 2D</span>
+            </button>
+          </div>
+          <span class="ribbon-label" data-i18n="grpSketch">Sketch</span>
+        </div>
+
+        <!-- Primitivas 3D -->
+        <div class="ribbon-group">
+          <div class="ribbon-btns">
+            <button type="button" class="tool-btn" data-add-type="BOX">
+              <span class="ico">🧊</span>
+              <span class="lbl" data-i18n="rbBox">Cubo</span>
+            </button>
+            <button type="button" class="tool-btn" data-add-type="CYLINDER">
+              <span class="ico">🛢</span>
+              <span class="lbl" data-i18n="rbCyl">Cilindro/Tubo</span>
+            </button>
+            <button type="button" class="tool-btn" data-add-type="SPHERE">
+              <span class="ico">⚪</span>
+              <span class="lbl" data-i18n="rbSphere">Esfera</span>
+            </button>
+            <button type="button" class="tool-btn" data-add-type="CONE">
+              <span class="ico">🔺</span>
+              <span class="lbl" data-i18n="rbCone">Cone</span>
+            </button>
+            <button type="button" class="tool-btn" data-add-type="TORUS">
+              <span class="ico">⭕</span>
+              <span class="lbl" data-i18n="rbTorus">O-Ring/Torus</span>
+            </button>
+          </div>
+          <span class="ribbon-label" data-i18n="grpPrimitives">Primitivas Paramétricas</span>
+        </div>
+
+        <!-- Geradores Mecânicos & Impressão 3D -->
+        <div class="ribbon-group">
+          <div class="ribbon-btns">
+            <button type="button" class="tool-btn accent" data-add-type="SPUR_GEAR">
+              <span class="ico">⚙️</span>
+              <span class="lbl" data-i18n="rbGear">Engrenagem</span>
+            </button>
+            <button type="button" class="tool-btn accent" data-add-type="L_BRACKET">
+              <span class="ico">📐</span>
+              <span class="lbl" data-i18n="rbBracket">Suporte L</span>
+            </button>
+            <button type="button" class="tool-btn accent" data-add-type="ENCLOSURE">
+              <span class="ico">📦</span>
+              <span class="lbl" data-i18n="rbEnclosure">Caixa PCB</span>
+            </button>
+            <button type="button" class="tool-btn accent" data-add-type="MOUNTING_PLATE">
+              <span class="ico">🎛</span>
+              <span class="lbl" data-i18n="rbPlate">Placa Furada</span>
+            </button>
+            <button type="button" class="tool-btn accent" data-add-type="HEX_BOLT">
+              <span class="ico">🔩</span>
+              <span class="lbl" data-i18n="rbBolt">Parafuso/Porca</span>
+            </button>
+            <button type="button" class="tool-btn accent" data-add-type="PULLEY">
+              <span class="ico">🛞</span>
+              <span class="lbl" data-i18n="rbPulley">Polia</span>
+            </button>
+          </div>
+          <span class="ribbon-label" data-i18n="grpMechanical">Geradores Mecânicos</span>
+        </div>
+
+        <!-- Operações Booleanas CSG & Furos -->
+        <div class="ribbon-group">
+          <div class="ribbon-btns">
+            <button type="button" class="tool-btn" id="btnCsgUnion" title="Unir sólido selecionado com outro (A ∪ B)">
+              <span class="ico">⊕</span>
+              <span class="lbl" data-i18n="rbUnion">Unir (CSG)</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnCsgSubtract" title="Furar / Subtrair sólido (A − B)">
+              <span class="ico">⊖</span>
+              <span class="lbl" data-i18n="rbSubtract">Subtrair/Furar</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnCsgIntersect" title="Interseção entre sólidos (A ∩ B)">
+              <span class="ico">⊗</span>
+              <span class="lbl" data-i18n="rbIntersect">Interseção</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnDrillQuickHole" title="Furo métrico rápido no centro da peça">
+              <span class="ico">🕳</span>
+              <span class="lbl" data-i18n="rbHole">Furo M4/M6</span>
+            </button>
+          </div>
+          <span class="ribbon-label" data-i18n="grpBoolean">Booleano (CSG)</span>
+        </div>
+
+        <!-- Padrões & Transformação -->
+        <div class="ribbon-group">
+          <div class="ribbon-btns">
+            <button type="button" class="tool-btn" id="btnLinearPattern">
+              <span class="ico">⋮⋮</span>
+              <span class="lbl" data-i18n="rbLinPat">Padrão Linear</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnCircularPattern">
+              <span class="ico">☸</span>
+              <span class="lbl" data-i18n="rbCircPat">Padrão Circular</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnMirrorX">
+              <span class="ico">⇋</span>
+              <span class="lbl" data-i18n="rbMirror">Espelhar</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnDuplicateSolid">
+              <span class="ico">⧉</span>
+              <span class="lbl" data-i18n="rbDuplicate">Duplicar</span>
+            </button>
+          </div>
+          <span class="ribbon-label" data-i18n="grpPattern">Padrão &amp; Cópia</span>
+        </div>
+
+        <!-- Exportação Multi-Formato -->
+        <div class="ribbon-group">
+          <div class="ribbon-btns">
+            <button type="button" class="tool-btn cyan-accent" id="btnExport3mf">
+              <span class="ico">🖨</span>
+              <span class="lbl">.3MF</span>
+            </button>
+            <button type="button" class="tool-btn cyan-accent" id="btnExportStep">
+              <span class="ico">📐</span>
+              <span class="lbl">.STEP</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnExportObj">
+              <span class="ico">📦</span>
+              <span class="lbl">.OBJ</span>
+            </button>
+            <button type="button" class="tool-btn" id="btnExportJson">
+              <span class="ico">{ }</span>
+              <span class="lbl">.JSON</span>
+            </button>
+          </div>
+          <span class="ribbon-label" data-i18n="grpExport">Formatos CAD</span>
+        </div>
+      </section>
+
+      <!-- MAIN 3-COLUMN STUDIO BODY -->
+      <main class="studio-body">
+        <!-- LEFT PANEL: FEATURE TREE & TEMPLATES -->
+        <aside class="left-browser" id="leftBrowser">
+          <div class="panel-head">
+            <span data-i18n="browserTitle">Árvore do Projeto</span>
+            <button type="button" class="tree-act-btn" id="btnClearScene" title="Limpar Cena">
+              🗑 <span data-i18n="clearBtn">Limpar</span>
+            </button>
+          </div>
+
+          <div class="browser-scroll">
+            <!-- Feature Tree / Bodies -->
+            <div class="tree-section">
+              <div class="tree-sec-title">
+                <span data-i18n="bodiesHeader">Sólidos &amp; Operações</span>
+                <span id="bodiesCountBadge" class="tree-type-tag">0</span>
+              </div>
+              <ul class="tree-list" id="featureTree"></ul>
+            </div>
+
+            <!-- Standard CAD Views -->
+            <div class="tree-section">
+              <div class="tree-sec-title">
+                <span data-i18n="viewsHeader">Vistas Padrão</span>
+              </div>
+              <div class="view-chips">
+                <button type="button" class="mini-chip" data-view="iso">Iso 3D</button>
+                <button type="button" class="mini-chip" data-view="top" data-i18n="vTop">Topo (Z)</button>
+                <button type="button" class="mini-chip" data-view="front" data-i18n="vFront">Frente (Y)</button>
+                <button type="button" class="mini-chip" data-view="right" data-i18n="vRight">Direita (X)</button>
+                <button type="button" class="mini-chip" data-view="left" data-i18n="vLeft">Esquerda</button>
+                <button type="button" class="mini-chip" data-view="back" data-i18n="vBack">Trás</button>
+              </div>
+            </div>
+
+            <!-- Showcase Parametric Templates -->
+            <div class="tree-section">
+              <div class="tree-sec-title">
+                <span data-i18n="demosHeader">Projetos Exemplo (1 Clique)</span>
+              </div>
+              <div class="demo-cards">
+                <button type="button" class="demo-btn" data-load-demo="rover">
+                  <span>🚀 <b data-i18n="demoRover">Robô Rover (SolidCraft)</b></span>
+                  <small>13 pts</small>
+                </button>
+                <button type="button" class="demo-btn" data-load-demo="gearbox">
+                  <span>⚙️ <b data-i18n="demoGearbox">Redutor de Engrenagens</b></span>
+                  <small>4 pts</small>
+                </button>
+                <button type="button" class="demo-btn" data-load-demo="enclosure">
+                  <span>📦 <b data-i18n="demoEnclosure">Caixa Eletrônica IoT</b></span>
+                  <small>3 pts</small>
+                </button>
+                <button type="button" class="demo-btn" data-load-demo="bracket">
+                  <span>📐 <b data-i18n="demoBracket">Cantoneira + Polia GT2</b></span>
+                  <small>2 pts</small>
+                </button>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- CENTER VIEWPORT -->
+        <section class="center-viewport" id="centerViewport">
+          <canvas id="cad3dCanvas"></canvas>
+
+          <!-- Top-Left Live Telemetry -->
+          <div class="viewport-telemetry">
+            <div class="telemetry-pill" id="telemetrySelection">
+              <span data-i18n="selLabel">Peça:</span>
+              <b id="hudSelectedName">—</b>
+              <span id="hudSelectedDims">0 × 0 × 0 mm</span>
+            </div>
+            <div class="telemetry-pill" id="telemetryMeasure" hidden>
+              <span>📏 <b id="hudMeasureVal">0.00 mm</b></span>
+            </div>
+          </div>
+
+          <!-- Top-Right ViewCube -->
+          <div class="view-cube-widget" aria-label="ViewCube">
+            <div class="vc-title">VIEWCUBE 3D</div>
+            <div class="vc-grid">
+              <button type="button" class="vc-btn" data-view="top" data-i18n="vcTop">TOPO</button>
+              <button type="button" class="vc-btn" data-view="iso">ISO</button>
+              <button type="button" class="vc-btn" data-view="front" data-i18n="vcFront">FRENTE</button>
+              <button type="button" class="vc-btn" data-view="right" data-i18n="vcRight">DIR</button>
+            </div>
+          </div>
+
+          <!-- Floating Bottom HUD Bar -->
+          <div class="viewport-hud-bar">
+            <button type="button" class="hud-btn" id="hudZoomFit" title="Enquadrar tudo (F)">
+              ⛶ <span data-i18n="hudFit">Enquadrar</span>
+            </button>
+            <button type="button" class="hud-btn" id="hudDropBed" title="Assentar na mesa Z=0">
+              ⤓ <span data-i18n="hudDrop">Mesa Z=0</span>
+            </button>
+            <button type="button" class="hud-btn" id="hudCenterBed" title="Centralizar X=0, Y=0">
+              ⌖ <span data-i18n="hudCenter">Centrar</span>
+            </button>
+            <div class="hud-sep"></div>
+            <button type="button" class="hud-btn active" data-style="shaded-edges">
+              立方 <span data-i18n="hudShadedEdges">Sólido + Arestas</span>
+            </button>
+            <button type="button" class="hud-btn" data-style="wireframe">
+              ⌗ <span data-i18n="hudWire">Aramado</span>
+            </button>
+            <button type="button" class="hud-btn" data-style="xray">
+              ◌ <span data-i18n="hudXray">Raio-X</span>
+            </button>
+            <div class="hud-sep"></div>
+            <button type="button" class="hud-btn" id="hudMeasureBtn" title="Medir distância entre 2 pontos na peça">
+              📏 <span data-i18n="hudMeasure">Trena 3D</span>
+            </button>
+            <button type="button" class="hud-btn" id="hudShotBtn" title="Salvar foto PNG">
+              📷 PNG
+            </button>
+          </div>
+
+          <!-- Interactive 2D Sketch Overlay -->
+          <div class="sketch-overlay" id="sketchOverlay" hidden>
+            <div class="sketch-topbar">
+              <div class="sketch-tools">
+                <strong style="color: var(--accent-cyan); margin-right: 6px" data-i18n="skTitle">
+                  ✏️ Esboço 2D no Plano XY (mm):
+                </strong>
+                <button type="button" class="hdr-btn active" data-sk-tool="rect">
+                  ▭ <span data-i18n="skRect">Retângulo</span>
+                </button>
+                <button type="button" class="hdr-btn" data-sk-tool="circle">
+                  ◯ <span data-i18n="skCircle">Círculo</span>
+                </button>
+                <button type="button" class="hdr-btn" data-sk-tool="slot">
+                   stadium <span data-i18n="skSlot">Oblongo (Slot)</span>
+                </button>
+                <button type="button" class="hdr-btn" data-sk-tool="hex">
+                  ⬡ <span data-i18n="skHex">Hexágono</span>
+                </button>
+                <button type="button" class="hdr-btn" data-sk-tool="hole">
+                  🕳 <span data-i18n="skHole">Furo Circular</span>
+                </button>
+                <button type="button" class="hdr-btn" id="btnSketchClear">
+                  🗑 <span data-i18n="skClear">Limpar</span>
+                </button>
+              </div>
+              <div class="sketch-tools">
+                <label style="font-size: 11.5px; color: var(--text-muted)">
+                  <span data-i18n="skHeightLbl">Altura Z (mm):</span>
+                  <input
+                    type="number"
+                    id="sketchExtrudeHeight"
+                    class="num-input"
+                    style="width: 68px; display: inline-block; margin-left: 4px"
+                    value="18"
+                    min="1"
+                    max="300"
+                  />
+                </label>
+                <button type="button" class="hdr-btn primary" id="btnFinishSketch">
+                  ✓ <span data-i18n="skExtrudeBtn">Extrudar para 3D</span>
+                </button>
+                <button type="button" class="hdr-btn" id="btnCancelSketch">
+                  × <span data-i18n="skCancel">Fechar</span>
+                </button>
+              </div>
+            </div>
+            <div class="sketch-canvas-wrap">
+              <canvas id="sketch2dCanvas"></canvas>
+            </div>
+          </div>
+
+          <!-- Bottom Parametric Timeline Scrubber -->
+          <div class="timeline-bar" id="timelineBar">
+            <div class="tl-controls">
+              <button type="button" class="tl-btn" id="tlFirst" title="Início">|&lt;&lt;</button>
+              <button type="button" class="tl-btn" id="tlPrev" title="Passo anterior">&lt;</button>
+              <button type="button" class="tl-btn" id="tlPlay" title="Animar histórico de construção">
+                ▶ <span data-i18n="tlReplay">Reproduzir Histórico</span>
+              </button>
+              <button type="button" class="tl-btn" id="tlNext" title="Próximo passo">&gt;</button>
+              <button type="button" class="tl-btn" id="tlLast" title="Final">&gt;&gt;|</button>
+              <span id="tlStepLabel" style="margin-left: 6px; font-family: var(--font-mono)">
+                0 / 0
+              </span>
+            </div>
+            <div>
+              <span data-i18n="bedInfo">Mesa de Impressão: 220 × 220 mm · Unidades: milímetros (mm)</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- RIGHT PANEL: PARAMETRIC INSPECTOR, 3D PRINT & AI/MCP -->
+        <aside class="right-inspector" id="rightInspector">
+          <div class="inspector-tabs" role="tablist">
+            <button type="button" class="insp-tab active" data-insp-tab="params" data-i18n="tabParams">
+              🔧 Parâmetros
+            </button>
+            <button type="button" class="insp-tab" data-insp-tab="print" data-i18n="tabPrint">
+              🖨️ Impressão 3D
+            </button>
+            <button type="button" class="insp-tab" data-insp-tab="ai" data-i18n="tabAi">
+              🤖 IA &amp; MCP
+            </button>
+          </div>
+
+          <!-- TAB 1: PARAMETRIC INSPECTOR -->
+          <div class="insp-pane" id="paneParams">
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="selectedPartTitle">Peça Selecionada</span>
+                <span id="inspTypeBadge" class="tree-type-tag">—</span>
+              </div>
+              <div class="field-row">
+                <label for="inspNameInput" data-i18n="lblPartName">Nome da Peça</label>
+                <input type="text" id="inspNameInput" class="txt-input" placeholder="Solid_1" />
+              </div>
+              <div id="dynamicParamFields" style="display: flex; flex-direction: column; gap: 6px"></div>
+            </div>
+
+            <!-- Position & Rotation in mm / deg -->
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="transformTitle">Posição (mm) &amp; Rotação (°)</span>
+              </div>
+              <div class="xyz-grid">
+                <div class="xyz-box">
+                  <span class="x-lbl">X (mm)</span>
+                  <input type="number" id="posX" class="num-input" step="1" value="0" />
+                </div>
+                <div class="xyz-box">
+                  <span class="y-lbl">Y Prof. (mm)</span>
+                  <input type="number" id="posY" class="num-input" step="1" value="0" />
+                </div>
+                <div class="xyz-box">
+                  <span class="z-lbl">Z Alt. (mm)</span>
+                  <input type="number" id="posZ" class="num-input" step="1" value="0" />
+                </div>
+              </div>
+              <div class="xyz-grid" style="margin-top: 4px">
+                <div class="xyz-box">
+                  <span class="x-lbl">Rot X (°)</span>
+                  <input type="number" id="rotX" class="num-input" step="5" value="0" />
+                </div>
+                <div class="xyz-box">
+                  <span class="y-lbl">Rot Y (°)</span>
+                  <input type="number" id="rotY" class="num-input" step="5" value="0" />
+                </div>
+                <div class="xyz-box">
+                  <span class="z-lbl">Rot Z (°)</span>
+                  <input type="number" id="rotZ" class="num-input" step="5" value="0" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Color & Appearance -->
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="materialColorTitle">Cor &amp; Acabamento</span>
+              </div>
+              <div class="swatches-row" id="colorSwatches">
+                <button type="button" class="color-swatch" data-color="#f97316" style="background: #f97316" title="Laranja SolidCraft"></button>
+                <button type="button" class="color-swatch" data-color="#38bdf8" style="background: #38bdf8" title="Azul CAD"></button>
+                <button type="button" class="color-swatch" data-color="#3b82f6" style="background: #3b82f6" title="Azul Real"></button>
+                <button type="button" class="color-swatch" data-color="#10b981" style="background: #10b981" title="Verde Esmeralda"></button>
+                <button type="button" class="color-swatch" data-color="#eab308" style="background: #eab308" title="Amarelo Industrial"></button>
+                <button type="button" class="color-swatch" data-color="#ef4444" style="background: #ef4444" title="Vermelho"></button>
+                <button type="button" class="color-swatch" data-color="#94a3b8" style="background: #94a3b8" title="Alumínio / Aço"></button>
+                <button type="button" class="color-swatch" data-color="#334155" style="background: #334155" title="Grafite Carbono"></button>
+                <button type="button" class="color-swatch" data-color="#f8fafc" style="background: #f8fafc" title="Branco PLA"></button>
+              </div>
+            </div>
+
+            <!-- Boolean CSG Combination Selector -->
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="csgCardTitle">Operação Booleana (CSG)</span>
+              </div>
+              <div class="field-row">
+                <label for="csgTargetSelect" data-i18n="csgSecondSolid">2º Sólido (Ferramenta):</label>
+                <select id="csgTargetSelect" class="sel-input"></select>
+              </div>
+              <div class="btn-row-3">
+                <button type="button" class="action-btn" id="inspCsgUnion">⊕ <span data-i18n="btnUnion">Unir</span></button>
+                <button type="button" class="action-btn orange" id="inspCsgSubtract">⊖ <span data-i18n="btnSub">Furar</span></button>
+                <button type="button" class="action-btn" id="inspCsgIntersect">⊗ <span data-i18n="btnInt">Interseção</span></button>
+              </div>
+            </div>
+
+            <!-- Quick Part Actions -->
+            <div class="btn-row">
+              <button type="button" class="action-btn" id="inspDuplicateBtn">
+                ⧉ <span data-i18n="rbDuplicate">Duplicar</span>
+              </button>
+              <button type="button" class="action-btn danger" id="inspDeleteBtn">
+                🗑 <span data-i18n="deletePart">Excluir Peça</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- TAB 2: 3D PRINT ANALYZER & LAYER SLICER -->
+          <div class="insp-pane" id="panePrint" hidden>
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="printMetricsTitle">Métricas Físicas de Impressão 3D</span>
+                <span id="bedFitBadge" class="tree-type-tag" style="color: #4ade80">✓ 220×220</span>
+              </div>
+              <div class="metrics-grid">
+                <div class="metric-box highlight">
+                  <small data-i18n="mWeight">Peso Estimado</small>
+                  <strong id="mWeightVal">0.0 g</strong>
+                </div>
+                <div class="metric-box highlight">
+                  <small data-i18n="mTime">Tempo de Impressão</small>
+                  <strong id="mTimeVal">0 min</strong>
+                </div>
+                <div class="metric-box">
+                  <small data-i18n="mVolume">Volume Sólido</small>
+                  <strong id="mVolVal">0.00 cm³</strong>
+                </div>
+                <div class="metric-box">
+                  <small data-i18n="mFilament">Filamento (1.75mm)</small>
+                  <strong id="mLenVal">0.00 m</strong>
+                </div>
+                <div class="metric-box">
+                  <small data-i18n="mCost">Custo de Material</small>
+                  <strong id="mCostVal">R$ 0,00</strong>
+                </div>
+                <div class="metric-box">
+                  <small data-i18n="mTriangles">Malha (Triângulos)</small>
+                  <strong id="mTriVal">0</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="slicerCfgTitle">Parâmetros do Fatiador</span>
+              </div>
+              <div class="field-row">
+                <label for="printMaterial" data-i18n="lblMaterial">Material</label>
+                <select id="printMaterial" class="sel-input">
+                  <option value="PLA">PLA (1.24 g/cm³)</option>
+                  <option value="PETG">PETG (1.27 g/cm³)</option>
+                  <option value="ABS">ABS / ASA (1.04 g/cm³)</option>
+                  <option value="TPU">TPU Flex (1.21 g/cm³)</option>
+                  <option value="RESIN">Resina SLA (1.15 g/cm³)</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label for="printInfill" data-i18n="lblInfill">Preenchimento (Infill %)</label>
+                <select id="printInfill" class="sel-input">
+                  <option value="15">15% (Leve / Protótipo)</option>
+                  <option value="20" selected>20% (Padrão Funcional)</option>
+                  <option value="40">40% (Reforçado / Mecânico)</option>
+                  <option value="60">60% (Alta Carga)</option>
+                  <option value="100">100% (Maciço)</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label for="printLayerH" data-i18n="lblLayerH">Altura da Camada</label>
+                <select id="printLayerH" class="sel-input">
+                  <option value="0.12">0.12 mm (Alta Precisão)</option>
+                  <option value="0.2" selected>0.20 mm (Padrão)</option>
+                  <option value="0.28">0.28 mm (Rápido / Draft)</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <label for="printSpoolPrice" data-i18n="lblSpoolPrice">Preço do Kg (R$)</label>
+                <input type="number" id="printSpoolPrice" class="num-input" value="110" min="20" max="1000" />
+              </div>
+            </div>
+
+            <!-- Layer Clipping Slicer Preview -->
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="slicePreviewTitle">Inspeção Interna por Camadas (Corte Z)</span>
+                <span id="slicePctBadge" class="tree-type-tag">100%</span>
+              </div>
+              <input
+                type="range"
+                id="sliceZRange"
+                min="1"
+                max="100"
+                value="100"
+                style="width: 100%; accent-color: var(--accent-orange)"
+              />
+              <small style="color: var(--text-muted); font-size: 11px" data-i18n="sliceHint">
+                Arraste para cortar horizontalmente a peça e inspecionar furos internos e encaixes.
+              </small>
+            </div>
+
+            <!-- Direct Export Suite -->
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="exportSuiteTitle">Exportar para Impressora 3D / CAD</span>
+              </div>
+              <div class="btn-row">
+                <button type="button" class="action-btn orange" id="printExportStlBin">
+                  ⬇ .STL (Binário)
+                </button>
+                <button type="button" class="action-btn orange" id="printExport3mf">
+                  ⬇ .3MF (Bambu/Prusa)
+                </button>
+                <button type="button" class="action-btn" id="printExportStep">
+                  ⬇ .STEP (FreeCAD)
+                </button>
+                <button type="button" class="action-btn" id="printExportObj">
+                  ⬇ .OBJ (Malha)
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 3: AI COPILOT & MCP SERVER CONSOLE -->
+          <div class="insp-pane" id="paneAi" hidden>
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span data-i18n="aiCopilotTitle">🤖 Copiloto Paramétrico (PT / EN)</span>
+              </div>
+              <textarea
+                id="aiPromptInput"
+                class="ai-textarea"
+                placeholder="Ex.: Suporte em L 65x45mm largura 30mm espessura 5mm com furos M4..."
+              ></textarea>
+              <button type="button" class="action-btn orange" id="btnRunAiPrompt">
+                ⚡ <span data-i18n="btnGenerateAi">Gerar / Modificar Peça 3D</span>
+              </button>
+              <small style="color: var(--text-muted); font-size: 10.5px" data-i18n="aiExamplesLbl">
+                Clique em um exemplo para testar na hora:
+              </small>
+              <div class="prompt-chips">
+                <button
+                  type="button"
+                  class="prompt-chip"
+                  data-prompt="Suporte em L 65x50mm largura 32mm espessura 5mm com furos M4"
+                >
+                  📐 Suporte L 65×50mm M4
+                </button>
+                <button
+                  type="button"
+                  class="prompt-chip"
+                  data-prompt="Engrenagem 26 dentes modulo 2 espessura 10mm furo 8mm"
+                >
+                  ⚙️ Engrenagem Z26 M2
+                </button>
+                <button
+                  type="button"
+                  class="prompt-chip"
+                  data-prompt="Caixa eletronica 88x60x32mm parede 2.5mm"
+                >
+                  📦 Caixa PCB 88×60×32
+                </button>
+                <button
+                  type="button"
+                  class="prompt-chip"
+                  data-prompt="Placa base 100x80x5mm com 4 furos M5"
+                >
+                  🎛 Placa 100×80mm M5
+                </button>
+                <button
+                  type="button"
+                  class="prompt-chip"
+                  data-prompt="Parafuso M6 comprimento 25mm"
+                >
+                  🔩 Parafuso M6×25
+                </button>
+                <button
+                  type="button"
+                  class="prompt-chip"
+                  data-prompt="Furar peca selecionada com furo de 6mm"
+                >
+                  🕳 Furar peça Ø6mm
+                </button>
+              </div>
+            </div>
+
+            <div class="prop-card">
+              <div class="prop-card-title">
+                <span>🔌 Model Context Protocol (MCP JSON)</span>
+                <button type="button" class="tree-act-btn" id="btnCopyMcp">📋 Copiar</button>
+              </div>
+              <textarea
+                id="mcpJsonConsole"
+                class="ai-textarea code-textarea"
+                spellcheck="false"
+              ></textarea>
+              <div class="btn-row">
+                <button type="button" class="action-btn" id="btnApplyMcpJson">
+                  ▶ <span data-i18n="btnApplyMcp">Aplicar JSON MCP</span>
+                </button>
+                <button type="button" class="action-btn" id="btnRefreshMcpJson">
+                  ↻ <span data-i18n="btnSyncMcp">Sincronizar</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </main>
+
+      <!-- FOOTER WITH 14 OFFICIAL 4U-LABS LINKS -->
+      <footer class="studio-footer">
+        <div>
+          <strong>3DCad Studio 1.0</strong> · 4u-Labs Open-Source Ecosystem
+        </div>
+        <nav class="footer-links" aria-label="4u-Labs Ecosystem">
+          <a href="https://4u.ia.br/" target="_blank" rel="noopener noreferrer">Portal 4U</a>
+          <a href="https://4u.ia.br/loja/index.php" target="_blank" rel="noopener noreferrer">Loja de Apps</a>
+          <a href="https://4u.ia.br/suporte.html" target="_blank" rel="noopener noreferrer">Central de Ajuda</a>
+          <a href="https://4u.ia.br/sobre.html" target="_blank" rel="noopener noreferrer">Sobre 4U</a>
+          <a href="https://4u.ia.br/termos.html" target="_blank" rel="noopener noreferrer">Termos</a>
+          <a href="https://4u.ia.br/politica.html" target="_blank" rel="noopener noreferrer">Privacidade</a>
+          <a href="https://github.com/4u-Labs" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://4u-labs.github.io/" target="_blank" rel="noopener noreferrer">Blog Dev</a>
+          <a href="https://alternativeto.net/user/4u-ia-br/added/" target="_blank" rel="noopener noreferrer">AlternativeTo</a>
+          <a href="https://www.youtube.com/@fbr4g4" target="_blank" rel="noopener noreferrer">YouTube</a>
+          <a href="https://www.instagram.com/fbr4g4/" target="_blank" rel="noopener noreferrer">Instagram</a>
+          <a href="https://www.facebook.com/fbr4g4/" target="_blank" rel="noopener noreferrer">Facebook</a>
+          <a href="https://x.com/fbr4g4" target="_blank" rel="noopener noreferrer">X / Twitter</a>
+          <a href="https://www.linkedin.com/in/fbr4g4/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+        </nav>
+      </footer>
+    </div>
+
+    <!-- 4U-LABS COMMUNITY & SUPPORT MODAL (14 LINKS + PAYPAL) -->
+    <div class="modal-backdrop" id="modal4uLabs" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal4uTitle">
+        <div class="modal-head">
+          <h2 id="modal4uTitle" data-i18n="ecoModalTitle">
+            Aplicativos, suporte e comunidade — 4u-Labs
+          </h2>
+          <button type="button" class="hdr-btn" id="btnClose4uModal">×</button>
+        </div>
+        <p style="color: var(--text-muted); line-height: 1.5" data-i18n="ecoModalDesc">
+          O 3DCad Studio faz parte do ecossistema gratuito e privado da 4u-Labs. Modele peças técnicas 3D direto no navegador, sem anúncios e sem limites de exportação.
+        </p>
+        <div class="links-grid-14">
+          <a href="https://4u.ia.br/" target="_blank" rel="noopener noreferrer"><span>Portal 4U</span> <span>↗</span></a>
+          <a href="https://4u.ia.br/loja/index.php" target="_blank" rel="noopener noreferrer"><span>Loja de Apps</span> <span>↗</span></a>
+          <a href="https://4u.ia.br/suporte.html" target="_blank" rel="noopener noreferrer"><span>Central de Ajuda</span> <span>↗</span></a>
+          <a href="https://4u.ia.br/sobre.html" target="_blank" rel="noopener noreferrer"><span>Sobre 4U</span> <span>↗</span></a>
+          <a href="https://4u.ia.br/termos.html" target="_blank" rel="noopener noreferrer"><span>Termos</span> <span>↗</span></a>
+          <a href="https://4u.ia.br/politica.html" target="_blank" rel="noopener noreferrer"><span>Privacidade</span> <span>↗</span></a>
+          <a href="https://github.com/4u-Labs" target="_blank" rel="noopener noreferrer"><span>GitHub</span> <span>↗</span></a>
+          <a href="https://4u-labs.github.io/" target="_blank" rel="noopener noreferrer"><span>Blog Dev</span> <span>↗</span></a>
+          <a href="https://alternativeto.net/user/4u-ia-br/added/" target="_blank" rel="noopener noreferrer"><span>AlternativeTo</span> <span>↗</span></a>
+          <a href="https://www.youtube.com/@fbr4g4" target="_blank" rel="noopener noreferrer"><span>YouTube</span> <span>↗</span></a>
+          <a href="https://www.instagram.com/fbr4g4/" target="_blank" rel="noopener noreferrer"><span>Instagram</span> <span>↗</span></a>
+          <a href="https://www.facebook.com/fbr4g4/" target="_blank" rel="noopener noreferrer"><span>Facebook</span> <span>↗</span></a>
+          <a href="https://x.com/fbr4g4" target="_blank" rel="noopener noreferrer"><span>X / Twitter</span> <span>↗</span></a>
+          <a href="https://www.linkedin.com/in/fbr4g4/" target="_blank" rel="noopener noreferrer"><span>LinkedIn</span> <span>↗</span></a>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px">
+          <a
+            href="https://www.paypal.com/ncp/payment/L7YRCS984T33N"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hdr-btn primary"
+            style="text-decoration: none"
+          >
+            ☕ <span data-i18n="supportProject">Apoiar o projeto (PayPal)</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <!-- SCRIPTS -->
+    <script src="libs/three.min.js"></script>
+    <script src="libs/OrbitControls.js"></script>
+    <script src="libs/STLExporter.js"></script>
+    <script src="libs/STLLoader.js"></script>
+    <script src="libs/three-csg.js"></script>
+    <script src="cad_generators.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

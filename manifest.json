@@ -1,0 +1,25 @@
+{
+  "name": "3DCad Studio — CAD 3D Paramétrico, Impressão 3D & IA (MCP)",
+  "short_name": "3DCad",
+  "description": "Estúdio CAD 3D paramétrico open-source no navegador com Sketch 2D, Extrusão, CSG Booleano, Engrenagens, Suportes, Análise de Impressão 3D, Copiloto IA (MCP) e exportação STL, 3MF, STEP e OBJ.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1118",
+  "theme_color": "#0d1118",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
