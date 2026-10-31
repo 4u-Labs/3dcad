@@ -1,48 +1,22 @@
-const CACHE_NAME = "3dcad-studio-v1.1.0";
-const ASSETS = [
-  "./",
-  "./index.html",
-  "./style.css",
-  "./cad_generators.js",
-  "./app.js",
-  "./manifest.json",
-  "./icon-192.png",
-  "./icon-512.png",
-  "./favicon-32x32.png",
-  "./libs/three.min.js",
-  "./libs/OrbitControls.js",
-  "./libs/STLExporter.js",
-  "./libs/STLLoader.js",
-  "./libs/three-csg.js"
-];
-
-self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).catch(() => {})
-  );
-  self.skipWaiting();
+/* Caches are shared by origin: this worker owns only this prefix and scope. */
+const CACHE_PREFIX = '3dcad-studio-';
+const CACHE_NAME = `${CACHE_PREFIX}v1.2.0-r3`;
+const ASSETS = ['./','./index.html','./style.css','./cad_mesh.js','./cad_generators.js','./cad_project.js','./ui_text.js','./app.js','./manifest.json','./icon-192.png','./icon-512.png','./icon-maskable-512.png','./icon.webp','./favicon-32x32.png','./favicon.ico','./libs/three.min.js','./libs/OrbitControls.js','./libs/STLExporter.js','./libs/STLLoader.js','./libs/three-csg.js'];
+const scope = self.registration.scope;
+const ownedAssets = new Set(ASSETS.map(asset=>new URL(asset,scope).href));
+self.addEventListener('install',event=>{
+  event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(ASSETS.map(asset=>new Request(new URL(asset,scope).href,{cache:'reload'})))).then(()=>self.skipWaiting()));
 });
-
-self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
-  );
-  self.clients.claim();
+self.addEventListener('activate',event=>{
+  event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith(CACHE_PREFIX)&&key!==CACHE_NAME).map(key=>caches.delete(key)))).then(()=>self.clients.claim()));
 });
-
-self.addEventListener("fetch", (e) => {
-  if (e.request.method !== "GET") return;
-  e.respondWith(
-    fetch(e.request)
-      .then((res) => {
-        if (res && res.status === 200 && res.type === "basic") {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then((c) => c.put(e.request, clone)).catch(() => {});
-        }
-        return res;
-      })
-      .catch(() => caches.match(e.request))
-  );
+self.addEventListener('fetch',event=>{
+  if(event.request.method!=='GET'||!ownedAssets.has(event.request.url))return;
+  // A successful installation keeps one coherent version; query strings,
+  // external requests and other apps never enter this cache.
+  event.respondWith(caches.open(CACHE_NAME).then(async cache=>{
+    const cached=await cache.match(event.request);
+    if(cached)return cached;
+    return fetch(event.request);
+  }).catch(()=>new Response('3DCad offline asset unavailable',{status:503,headers:{'Content-Type':'text/plain;charset=utf-8'}})));
 });

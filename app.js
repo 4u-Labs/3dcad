@@ -245,7 +245,12 @@
     },
   };
 
-  let lang = localStorage.getItem("3dcad_lang") || "pt";
+  Object.assign(I18N.pt, CadUI.pt);
+  Object.assign(I18N.en, CadUI.en);
+  function applyExtraTranslations() { CadUI.translate(lang); }
+
+  let lang = "pt";
+  try { lang = localStorage.getItem("3dcad_lang") || "pt"; } catch {}
   if (!["pt", "en"].includes(lang)) lang = "pt";
   const L = (pt, en) => (lang === "pt" ? pt : en);
 
@@ -338,6 +343,14 @@
   let measurePoints = [];
   let undoStack = [];
   let redoStack = [];
+  let restoring = false;
+  let isBooting = true;
+  let saveTimer = null;
+  let saveRevision = 0;
+  let pendingEdits = new Set();
+  let savedScene = "";
+  let timelineTimer = null;
+  const projectStore = CadProject.createStore();
 
   const DEFAULT_PARAMS = {
     BOX: { width: 40, depth: 30, height: 20, cornerRadius: 2, boreDiameter: 0 },
@@ -419,128 +432,109 @@
     if (edgeChild) edgeChild.visible = visualStyle === "shaded-edges";
   }
 
-  function createParametricSolid(type, customOpts = {}) {
-    const params = {
-      ...(DEFAULT_PARAMS[type] || {}),
-      ...(customOpts.params || {}),
-    };
-    const geom = CadGenerators.buildParametricGeometry(type, params);
-    geom.computeBoundingBox();
-    const bbox = geom.boundingBox;
-    const h = bbox ? bbox.max.y - bbox.min.y : 20;
-
-    const color = customOpts.color || DEFAULT_COLORS[type] || "#f97316";
-    const mat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(color),
-      roughness: 0.36,
-      metalness: 0.18,
-      clippingPlanes: [slicePlane],
-      side: THREE.DoubleSide,
+  function disposeMesh(mesh) {
+    mesh.traverse(child => {
+      child.geometry?.dispose();
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach(material => material?.dispose());
     });
+  }
 
+  function newId(prefix = "solid") {
+    let id;
+    do { id = `${prefix}_${idCounter++}`; } while (solids.some(s => s.userData.id === id));
+    return id;
+  }
+
+  function buildSolid(type, customOpts = {}) {
+    const isMesh = ["CSG_SOLID", "STL_IMPORT", "MESH"].includes(type);
+    const params = isMesh ? {} : CadProject.validateParams(type, {...(DEFAULT_PARAMS[type] || {}), ...(customOpts.params || {})});
+    const record = CadProject.validateItems([{...customOpts, id: customOpts.id || newId(), type, params,
+      color: customOpts.color || DEFAULT_COLORS[type] || "#f97316",
+      name: customOpts.name || `${type}_${solids.length + 1}`}])[0];
+    const geom = CadProject.geometry(record);
+    geom.computeBoundingBox();
+    if (geom.boundingBox.isEmpty()) { geom.dispose(); throw new Error(L("Operação sem volume", "Operation has no volume")); }
+    const mat = new THREE.MeshStandardMaterial({color: record.color, roughness: 0.36, metalness: 0.18, clippingPlanes: [slicePlane], side: THREE.DoubleSide});
     const mesh = new THREE.Mesh(geom, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-
-    const uid = customOpts.id || `solid_${idCounter++}`;
-    const name = customOpts.name || `${type}_${solids.length + 1}`;
-
-    if (Array.isArray(customOpts.pos)) {
-      mesh.position.set(customOpts.pos[0], customOpts.pos[1], customOpts.pos[2]);
-    } else {
-      // Place on Z=0 build plate (Three.js Y = h/2) with small offset if overlapping
-      const offset = (solids.length % 5) * 6 - 12;
-      mesh.position.set(solids.length ? offset : 0, h / 2, 0);
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.position.fromArray(record.pos);
+    mesh.rotation.set(...record.rot.map(THREE.MathUtils.degToRad));
+    mesh.scale.fromArray(record.scale);
+    mesh.visible = record.visible;
+    if (!customOpts.pos) {
+      mesh.position.x = solids.length ? (solids.length % 5) * 6 - 12 : 0;
+      mesh.updateWorldMatrix(true, false);
+      mesh.position.y -= new THREE.Box3().setFromObject(mesh).min.y;
     }
-
-    if (Array.isArray(customOpts.rot)) {
-      mesh.rotation.set(
-        THREE.MathUtils.degToRad(customOpts.rot[0] || 0),
-        THREE.MathUtils.degToRad(customOpts.rot[1] || 0),
-        THREE.MathUtils.degToRad(customOpts.rot[2] || 0)
-      );
-    }
-
-    mesh.userData = {
-      id: uid,
-      type,
-      name,
-      color,
-      params,
-      isParametric: true,
-    };
-
+    mesh.userData = {id: record.id, type, name: record.name, color: record.color, params, isParametric: !isMesh};
+    const suffix = /_(\d+)$/.exec(record.id);
+    if (suffix) idCounter = Math.max(idCounter, Number(suffix[1]) + 1);
     attachCadEdges(mesh);
     applyVisualStyleToMesh(mesh);
-    scene.add(mesh);
-    solids.push(mesh);
-    timelineStep = solids.length;
-    selectSolid(mesh);
-    refreshAllUI();
+    return mesh;
+  }
+
+  function triangleCount(geometry) { return (geometry.index?.count || geometry.attributes.position.count) / 3; }
+  function ensureCapacity(geometry, except = null) {
+    if (solids.filter(s=>s!==except).reduce((sum,s)=>sum+triangleCount(s.geometry),0)+triangleCount(geometry)>CadMesh.MAX_TRIANGLES)
+      throw new Error(L("Projeto excede 250.000 triângulos.", "Project exceeds 250,000 triangles."));
+  }
+
+  function createParametricSolid(type, customOpts = {}) {
+    if (solids.length >= CadProject.MAX_SOLIDS) throw new Error(L("Limite de 150 peças atingido", "150-part limit reached"));
+    const mesh = buildSolid(type, customOpts);
+    try { ensureCapacity(mesh.geometry); } catch(error) { disposeMesh(mesh); throw error; }
+    scene.add(mesh); solids.push(mesh); timelineStep = solids.length;
+    selectSolid(mesh); refreshAllUI();
     return mesh;
   }
 
   function rebuildSolidGeometry(mesh) {
-    if (!mesh || !mesh.userData?.isParametric) return;
-    const prevBox = new THREE.Box3().setFromObject(mesh);
-    const wasOnBed = Math.abs(prevBox.min.y) < 0.5;
-
-    const newGeom = CadGenerators.buildParametricGeometry(
-      mesh.userData.type,
-      mesh.userData.params
-    );
-    mesh.geometry.dispose();
-    mesh.geometry = newGeom;
+    if (!mesh?.userData?.isParametric) return;
+    const wasOnBed = Math.abs(new THREE.Box3().setFromObject(mesh).min.y) < 0.001;
+    const next = CadGenerators.buildParametricGeometry(mesh.userData.type, mesh.userData.params);
+    try { ensureCapacity(next,mesh); } catch(error) { next.dispose(); throw error; }
+    mesh.geometry.dispose(); mesh.geometry = next;
     attachCadEdges(mesh);
-
     if (wasOnBed) {
-      newGeom.computeBoundingBox();
-      const h = newGeom.boundingBox.max.y - newGeom.boundingBox.min.y;
-      mesh.position.y = h / 2;
-      if ($("#posZ")) $("#posZ").value = Number(mesh.position.y.toFixed(1));
+      mesh.updateWorldMatrix(true, false);
+      mesh.position.y -= new THREE.Box3().setFromObject(mesh).min.y;
+      if ($("#posZ")) $("#posZ").value = Number(mesh.position.y.toFixed(4));
     }
-    updateTelemetryAndPrintMetrics();
-    syncMcpConsole();
+    updateTelemetryAndPrintMetrics(); syncMcpConsole();
   }
 
-  // === UNDO / REDO SNAPSHOTS ===
-  function serializeSceneState() {
-    return solids
-      .filter((s) => s.userData?.isParametric)
-      .map((s) => ({
-        id: s.userData.id,
-        type: s.userData.type,
-        name: s.userData.name,
-        color: s.userData.color,
-        params: JSON.parse(JSON.stringify(s.userData.params || {})),
-        pos: [
-          Number(s.position.x.toFixed(2)),
-          Number(s.position.y.toFixed(2)),
-          Number(s.position.z.toFixed(2)),
-        ],
-        rot: [
-          Number(THREE.MathUtils.radToDeg(s.rotation.x).toFixed(1)),
-          Number(THREE.MathUtils.radToDeg(s.rotation.y).toFixed(1)),
-          Number(THREE.MathUtils.radToDeg(s.rotation.z).toFixed(1)),
-        ],
-      }));
-  }
+  function serializeSceneState() { return solids.map(CadProject.serialize); }
 
-  function pushUndoSnapshot() {
-    undoStack.push(JSON.stringify(serializeSceneState()));
-    if (undoStack.length > 30) undoStack.shift();
+  function flushEdits() { [...pendingEdits].forEach(flush => flush()); }
+
+  function pushUndoSnapshot(snapshot = JSON.stringify(serializeSceneState())) {
+    if (undoStack.at(-1) !== snapshot) undoStack.push(snapshot);
+    // Snapshots include meshes. Bound both count and serialized memory.
+    let bytes = undoStack.reduce((sum, item) => sum + item.length, 0);
+    while (undoStack.length > 30 || (bytes > 48 * 1024 * 1024 && undoStack.length > 1)) bytes -= undoStack.shift().length;
     redoStack = [];
   }
 
   function restoreSceneFromItems(items) {
-    clearAllSolids(false);
-    for (const item of items) {
-      createParametricSolid(item.type, item);
-    }
+    const records = CadProject.validateItems(items), staged = [];
+    try { let triangles=0;for (const item of records) { const mesh=buildSolid(item.type,item);staged.push(mesh);triangles+=triangleCount(mesh.geometry);if(triangles>CadMesh.MAX_TRIANGLES)throw new Error(L("Projeto excede 250.000 triângulos.", "Project exceeds 250,000 triangles.")); } }
+    catch (error) { staged.forEach(disposeMesh); throw error; }
+    const selectedId = selectedSolid?.userData.id;
+    restoring = true;
+    for (const mesh of solids) { scene.remove(mesh); disposeMesh(mesh); }
+    solids = staged;
+    solids.forEach(mesh => scene.add(mesh));
+    selectedSolid = null;
+    timelineStep = solids.length;
+    restoring = false;
+    selectSolid(solids.find(mesh => mesh.userData.id === selectedId) || solids.at(-1) || null);
     refreshAllUI();
   }
 
   function undo() {
+    flushEdits();
     if (!undoStack.length) {
       showToast(L("Nada para desfazer.", "Nothing to undo."));
       return;
@@ -552,6 +546,7 @@
   }
 
   function redo() {
+    flushEdits();
     if (!redoStack.length) {
       showToast(L("Nada para refazer.", "Nothing to redo."));
       return;
@@ -564,6 +559,7 @@
 
   // === SELECTION & INSPECTOR ===
   function selectSolid(mesh) {
+    if (mesh !== selectedSolid) flushEdits();
     if (selectedSolid && selectedSolid.material) {
       selectedSolid.material.emissive = new THREE.Color(0x000000);
       selectedSolid.material.emissiveIntensity = 0;
@@ -583,8 +579,7 @@
     const idx = solids.indexOf(mesh);
     if (idx !== -1) solids.splice(idx, 1);
     scene.remove(mesh);
-    mesh.geometry?.dispose();
-    mesh.material?.dispose();
+    disposeMesh(mesh);
     if (selectedSolid === mesh) {
       selectedSolid = solids.at(-1) || null;
       if (selectedSolid) selectSolid(selectedSolid);
@@ -598,8 +593,7 @@
     while (solids.length > 0) {
       const m = solids.pop();
       scene.remove(m);
-      m.geometry?.dispose();
-      m.material?.dispose();
+      disposeMesh(m);
     }
     selectedSolid = null;
     timelineStep = 0;
@@ -612,31 +606,37 @@
     const countBadge = $("#bodiesCountBadge");
     if (!listEl) return;
     countBadge.textContent = String(solids.length);
+    listEl.setAttribute("role","tree");
     listEl.innerHTML = "";
 
     solids.forEach((mesh, idx) => {
       const li = document.createElement("li");
       li.className = "tree-item" + (mesh === selectedSolid ? " selected" : "");
       const visibleIcon = mesh.visible ? "👁" : "🚫";
-      li.innerHTML = `
-        <div class="tree-item-left">
-          <span class="color-dot" style="background:${mesh.userData.color || "#f97316"}"></span>
-          <span class="tree-name">${mesh.userData.name || `Solid_${idx + 1}`}</span>
-          <span class="tree-type-tag">${mesh.userData.type}</span>
-        </div>
-        <div class="tree-actions">
-          <button type="button" class="tree-act-btn" data-toggle-vis="${idx}" title="Mostrar/Ocultar">${visibleIcon}</button>
-          <button type="button" class="tree-act-btn" data-del-idx="${idx}" title="Excluir">×</button>
-        </div>
-      `;
+      li.tabIndex = 0;
+      li.setAttribute("role", "treeitem");
+      li.setAttribute("aria-selected",String(mesh===selectedSolid));
+      li.setAttribute("aria-label", mesh.userData.name);
+      const left = document.createElement("div"); left.className = "tree-item-left";
+      const dot = document.createElement("span"); dot.className = "color-dot"; dot.style.backgroundColor = mesh.userData.color;
+      const label = document.createElement("span"); label.className = "tree-name"; label.textContent = mesh.userData.name; label.title = mesh.userData.name;
+      const tag = document.createElement("span"); tag.className = "tree-type-tag"; tag.textContent = mesh.userData.type;
+      left.append(dot, label, tag);
+      const actions = document.createElement("div"); actions.className = "tree-actions";
+      const vis = document.createElement("button"); vis.type = "button"; vis.className = "tree-act-btn"; vis.dataset.toggleVis = String(idx); vis.textContent = visibleIcon;
+      vis.title = L("Mostrar/Ocultar", "Show/Hide"); vis.setAttribute("aria-label", `${vis.title}: ${mesh.userData.name}`);
+      const del = document.createElement("button"); del.type = "button"; del.className = "tree-act-btn"; del.dataset.delIdx = String(idx); del.textContent = "×";
+      del.title = L("Excluir", "Delete"); del.setAttribute("aria-label", `${del.title}: ${mesh.userData.name}`);
+      actions.append(vis, del); li.append(left, actions);
+      li.addEventListener("keydown", e => { if (e.target === li && ["Enter", " "].includes(e.key)) { e.preventDefault(); selectSolid(mesh); } });
       li.addEventListener("click", (e) => {
         const visBtn = e.target.closest("[data-toggle-vis]");
         const delBtn = e.target.closest("[data-del-idx]");
         if (visBtn) {
           e.stopPropagation();
+          pushUndoSnapshot();
           mesh.visible = !mesh.visible;
-          renderFeatureTree();
-          updateTelemetryAndPrintMetrics();
+          refreshAllUI();
           return;
         }
         if (delBtn) {
@@ -654,14 +654,16 @@
     const csgSel = $("#csgTargetSelect");
     if (csgSel) {
       const others = solids.filter((s) => s !== selectedSolid);
-      csgSel.innerHTML = others.length
-        ? others
-            .map(
-              (s, i) =>
-                `<option value="${s.userData.id}" ${i === others.length - 1 ? "selected" : ""}>${s.userData.name} (${s.userData.type})</option>`
-            )
-            .join("")
-        : `<option value="">— ${L("Adicione 2+ sólidos", "Add 2+ solids")} —</option>`;
+      const previous = csgSel.value;
+      csgSel.replaceChildren();
+      if (!others.length) {
+        const option = document.createElement("option"); option.value = ""; option.textContent = L("Adicione 2+ sólidos", "Add 2+ solids"); csgSel.append(option);
+      } else for (const other of others) {
+        const option = document.createElement("option"); option.value = other.userData.id;
+        option.textContent = `${other.userData.name} (${other.userData.type})`; csgSel.append(option);
+      }
+      csgSel.value = others.some(s => s.userData.id === previous) ? previous : others.at(-1)?.userData.id || "";
+
     }
 
     const tlLbl = $("#tlStepLabel");
@@ -691,12 +693,12 @@
     typeBadge.textContent = ud.type || "SOLID";
 
     // Transform inputs: map Three.js (x, y_up, z_depth) -> CAD (X, Y_depth, Z_height)
-    $("#posX").value = Number(selectedSolid.position.x.toFixed(1));
-    $("#posY").value = Number(selectedSolid.position.z.toFixed(1));
-    $("#posZ").value = Number(selectedSolid.position.y.toFixed(1));
-    $("#rotX").value = Math.round(THREE.MathUtils.radToDeg(selectedSolid.rotation.x));
-    $("#rotY").value = Math.round(THREE.MathUtils.radToDeg(selectedSolid.rotation.z));
-    $("#rotZ").value = Math.round(THREE.MathUtils.radToDeg(selectedSolid.rotation.y));
+    $("#posX").value = Number(selectedSolid.position.x.toFixed(6));
+    $("#posY").value = Number(selectedSolid.position.z.toFixed(6));
+    $("#posZ").value = Number(selectedSolid.position.y.toFixed(6));
+    $("#rotX").value = Number(THREE.MathUtils.radToDeg(selectedSolid.rotation.x).toFixed(6));
+    $("#rotY").value = Number(THREE.MathUtils.radToDeg(selectedSolid.rotation.z).toFixed(6));
+    $("#rotZ").value = Number(THREE.MathUtils.radToDeg(selectedSolid.rotation.y).toFixed(6));
 
     $$("#colorSwatches .color-swatch").forEach((sw) => {
       sw.classList.toggle(
@@ -728,12 +730,16 @@
       inp.max = field.max;
       inp.step = field.step || 1;
       inp.value = ud.params?.[field.key] ?? field.min;
-      inp.addEventListener("input", () => {
-        const val = Number(inp.value);
-        if (!Number.isFinite(val)) return;
-        ud.params[field.key] = val;
-        rebuildSolidGeometry(selectedSolid);
-      });
+      inp.id = `param_${field.key}`;
+      lbl.htmlFor = inp.id;
+      inp.setAttribute("aria-label", lbl.textContent);
+      bindEdit(inp, value => {
+        const val = Number(value);
+        const params = CadProject.validateParams(ud.type, {...ud.params, [field.key]: val});
+        const old = ud.params;
+        ud.params = params;
+        try { rebuildSolidGeometry(selectedSolid); } catch (error) { ud.params = old; throw error; }
+      }, true);
       row.append(lbl, inp);
       dynWrap.appendChild(row);
     }
@@ -741,7 +747,7 @@
 
   // === TELEMETRY & 3D PRINT METRICS ===
   function updateTelemetryAndPrintMetrics() {
-    const targetMeshes = selectedSolid ? [selectedSolid] : solids;
+    const targetMeshes = $("#printScope")?.value === "scene" ? solids : selectedSolid ? [selectedSolid] : solids;
     const printSettings = {
       material: $("#printMaterial")?.value || "PLA",
       infill: Number($("#printInfill")?.value || 20),
@@ -759,41 +765,69 @@
     $("#mWeightVal").textContent = `${metrics.weightGrams} g`;
     $("#mTimeVal").textContent = metrics.timeFormatted;
     $("#mVolVal").textContent = `${metrics.volumeCm3} cm³`;
-    $("#mLenVal").textContent = `${metrics.filamentMeters} m`;
+    $("#mLenVal").textContent = metrics.material === "RESIN" ? L("Não se aplica", "Not applicable") : `${metrics.filamentMeters} m`;
     $("#mCostVal").textContent = `R$ ${metrics.costBrl.toFixed(2).replace(".", ",")}`;
-    $("#mTriVal").textContent = metrics.triangles.toLocaleString("pt-BR");
+    $("#mTriVal").textContent = metrics.triangles.toLocaleString(lang === "pt" ? "pt-BR" : "en-US");
 
     const fitBadge = $("#bedFitBadge");
     if (fitBadge) {
-      fitBadge.textContent = metrics.fitsBed220 ? "✓ 220×220 mm" : "⚠ > 220 mm";
-      fitBadge.style.color = metrics.fitsBed220 ? "#4ade80" : "#f87171";
+      const job = CadGenerators.analyzeMeshFor3DPrint(solids, printSettings);
+      fitBadge.textContent = job.fitsBed220 ? L("✓ Cena na mesa", "✓ Scene on bed") : L("⚠ Cena fora da mesa", "⚠ Scene outside bed");
+      fitBadge.style.color = job.fitsBed220 ? "#4ade80" : "#f87171";
     }
   }
 
-  let isBooting = true;
-  function saveAutoSave() {
-    if (isBooting) return;
-    try {
-      const state = serializeSceneState();
-      localStorage.setItem("3dcad_autosave_v1", JSON.stringify(state));
-      const badge = $("#autoSaveBadge");
-      if (badge) {
-        badge.textContent = L("💾 Salvo", "💾 Saved");
-        badge.style.color = "#4ade80";
-      }
-    } catch {}
+  function setSaveStatus(state) {
+    const badge = $("#autoSaveBadge");
+    const labels = {pending: L("Salvando…", "Saving…"), saved: L("Salvo neste navegador", "Saved in this browser"), error: L("Não salvo — exporte JSON", "Not saved — export JSON")};
+    if (badge) { badge.textContent = labels[state]; badge.dataset.state = state; badge.style.color = state === "saved" ? "#4ade80" : state === "error" ? "#f87171" : "#fbbf24"; }
   }
 
+  function saveAutoSave() {
+    if (isBooting || restoring) return;
+    const state = JSON.stringify(CadProject.document(serializeSceneState()));
+    if (state === savedScene) return;
+    const revision = ++saveRevision;
+    setSaveStatus("pending"); clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      try { await projectStore.save(JSON.parse(state)); if (revision === saveRevision) { savedScene = state; setSaveStatus("saved"); } }
+      catch (error) { if (revision === saveRevision) { setSaveStatus("error"); showToast(L("Não foi possível salvar. Exporte seu projeto JSON.", "Unable to save. Export your JSON project.")); } }
+    }, 300);
+  }
+
+  function renderProjectConsole() {
+    const input = $("#mcpJsonConsole"), doc = CadProject.document(serializeSceneState());
+    const text = JSON.stringify(doc,null,2), large = text.length > 60000;
+    input.dataset.previewOnly = large ? 'true' : 'false';
+    input.value = large ? JSON.stringify({format:doc.format,version:doc.version,units:doc.units,preview:true,partCount:doc.solids.length,solids:doc.solids.map(s=>({id:s.id,type:s.type,name:s.name,vertices:s.geometry?.positions.length/3,triangles:s.geometry?(s.geometry.index?.length||s.geometry.positions.length/3)/3:undefined,visible:s.visible}))},null,2) : text;
+    $("#btnApplyMcpJson").disabled = large;
+  }
   function syncMcpConsole() {
-    const mcpEl = $("#mcpJsonConsole");
-    if (!mcpEl) return;
-    const payload = {
-      protocol: "3dcad-mcp/1.0",
-      units: "mm",
-      solids: serializeSceneState(),
-    };
-    mcpEl.value = JSON.stringify(payload, null, 2);
+    const input = $("#mcpJsonConsole");
+    if (input && document.activeElement !== input) renderProjectConsole();
     saveAutoSave();
+  }
+
+  function bindEdit(input, apply, debounce = false) {
+    let snapshot = null, timer = null;
+    const commit = () => {
+      clearTimeout(timer); pendingEdits.delete(commit);
+      if (snapshot === null) return;
+      try {
+        apply(input.value);
+        if (snapshot !== JSON.stringify(serializeSceneState())) pushUndoSnapshot(snapshot);
+        input.setCustomValidity("");
+      } catch (error) { input.setCustomValidity(error.message); input.reportValidity(); showToast(error.message); }
+      snapshot = null;
+    };
+    input.addEventListener("input", () => {
+      if (!selectedSolid) return;
+      if (snapshot === null) snapshot = JSON.stringify(serializeSceneState());
+      if (debounce) { clearTimeout(timer); pendingEdits.add(commit); timer = setTimeout(commit, 220); }
+      else { pendingEdits.add(commit); commit(); }
+    });
+    input.addEventListener("change", commit);
+    input.addEventListener("blur", commit);
   }
 
   function refreshAllUI() {
@@ -804,125 +838,53 @@
   }
 
   // === CSG BOOLEAN OPERATIONS & QUICK HOLE ===
-  function runBooleanOp(opType) {
-    if (typeof CSG === "undefined") {
-      showToast(L("Módulo CSG não carregado.", "CSG module not loaded."));
-      return;
-    }
-    if (solids.length < 2) {
-      showToast(
-        L(
-          "Adicione pelo menos 2 sólidos para usar União / Subtração (CSG).",
-          "Add at least 2 solids to run Boolean Union / Subtract."
-        )
-      );
-      return;
-    }
-    const baseMesh = selectedSolid || solids[0];
-    const targetId = $("#csgTargetSelect")?.value;
-    const toolMesh =
-      solids.find((s) => s.userData.id === targetId && s !== baseMesh) ||
-      solids.find((s) => s !== baseMesh);
-    if (!baseMesh || !toolMesh) return;
-
-    try {
-      pushUndoSnapshot();
-      baseMesh.updateMatrix();
-      toolMesh.updateMatrix();
-      const csgA = CSG.fromMesh(baseMesh);
-      const csgB = CSG.fromMesh(toolMesh);
-      const outCsg =
-        opType === "union"
-          ? csgA.union(csgB)
-          : opType === "intersect"
-          ? csgA.intersect(csgB)
-          : csgA.subtract(csgB);
-
-      const newMat = baseMesh.material.clone();
-      const resMesh = CSG.toMesh(outCsg, baseMesh.matrix, newMat);
-      resMesh.castShadow = true;
-      resMesh.receiveShadow = true;
-      resMesh.userData = {
-        id: `csg_${idCounter++}`,
-        type: "CSG_SOLID",
-        name: `${baseMesh.userData.name}_${opType}`,
-        color: baseMesh.userData.color || "#f97316",
-        params: {},
-        isParametric: false,
-      };
-      attachCadEdges(resMesh);
-      applyVisualStyleToMesh(resMesh);
-
-      removeSolid(baseMesh);
-      removeSolid(toolMesh);
-      scene.add(resMesh);
-      solids.push(resMesh);
-      timelineStep = solids.length;
-      selectSolid(resMesh);
-      refreshAllUI();
-      showToast(
-        L(
-          `Operação booleana (${opType.toUpperCase()}) concluída!`,
-          `Boolean ${opType.toUpperCase()} completed!`
-        )
-      );
-    } catch (e) {
-      showToast(e.message);
-    }
+  function booleanOperand(mesh) {
+    const geometry=mesh.geometry;
+    if((geometry.index?.count||geometry.attributes.position.count)/3>30000) throw new Error(L('CSG aceita até 30.000 triângulos por peça.', 'CSG accepts up to 30,000 triangles per part.'));
+    const data=CadMesh.fromMesh(mesh,false);
+    if(data.diagnostics.boundaryEdges||data.diagnostics.nonManifoldEdges)throw new Error(L('CSG exige malhas fechadas. Valide a peça.', 'CSG requires closed meshes. Validate the part.'));
+    const operand=new THREE.Mesh(CadMesh.toGeometry(data),new THREE.MeshStandardMaterial());operand.updateMatrix();return operand;
   }
-
-  function drillQuickHoleOnSelected(holeDia = 4.2) {
-    const target = selectedSolid || solids.at(-1);
-    if (!target || typeof CSG === "undefined") {
-      showToast(L("Selecione uma peça primeiro.", "Select a part first."));
-      return;
-    }
+  function commitCsg(csg,base,removed,name) {
+    const result=CSG.toMesh(csg,new THREE.Matrix4(),base.material.clone());
+    try {
+      const data=CadMesh.fromMesh(result,false);
+      if(!data.triangles.length||Math.abs(CadMesh.signedVolume(data.vertices,data.triangles))<1e-6)throw new Error(L('A operação não produz volume. A cena foi preservada.', 'The operation produces no volume. The scene was preserved.'));
+      const geometry=CadMesh.toGeometry(data);result.geometry.dispose();result.geometry=geometry;
+      const center=new THREE.Vector3();geometry.boundingBox.getCenter(center);geometry.translate(-center.x,-center.y,-center.z);result.position.copy(center);
+      result.castShadow=result.receiveShadow=true;
+      result.userData={id:newId('csg'),type:'CSG_SOLID',name:name.slice(0,160),color:base.userData.color,params:{},isParametric:false};
+      attachCadEdges(result);applyVisualStyleToMesh(result);
+    } catch(error){disposeMesh(result);throw error;}
     pushUndoSnapshot();
-    const box = new THREE.Box3().setFromObject(target);
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    box.getSize(size);
-    box.getCenter(center);
-
-    const drillGeom = new THREE.CylinderGeometry(
-      holeDia / 2,
-      holeDia / 2,
-      Math.max(size.y * 2.5, 100),
-      32
-    );
-    const drillMesh = new THREE.Mesh(drillGeom, target.material.clone());
-    drillMesh.position.copy(center);
-    drillMesh.updateMatrix();
-    target.updateMatrix();
-
-    const outCsg = CSG.fromMesh(target).subtract(CSG.fromMesh(drillMesh));
-    const resMesh = CSG.toMesh(outCsg, target.matrix, target.material.clone());
-    resMesh.castShadow = true;
-    resMesh.receiveShadow = true;
-    resMesh.userData = {
-      ...target.userData,
-      id: `csg_${idCounter++}`,
-      type: "CSG_SOLID",
-      name: `${target.userData.name}_FuroM${Math.round(holeDia)}`,
-      isParametric: false,
-    };
-    attachCadEdges(resMesh);
-    applyVisualStyleToMesh(resMesh);
-    removeSolid(target);
-    scene.add(resMesh);
-    solids.push(resMesh);
-    selectSolid(resMesh);
-    refreshAllUI();
-    showToast(
-      L(
-        `Furo passante Ø${holeDia}mm aplicado na peça!`,
-        `Drilled Ø${holeDia}mm through-hole!`
-      )
-    );
+    for(const mesh of removed){scene.remove(mesh);disposeMesh(mesh);}
+    solids=solids.filter(mesh=>!removed.includes(mesh));solids.push(result);scene.add(result);
+    selectedSolid=null;timelineStep=solids.length;selectSolid(result);refreshAllUI();return result;
+  }
+  function runBooleanOp(opType) {
+    flushEdits();
+    if(!['union','subtract','intersect'].includes(opType))return;
+    const base=selectedSolid,tool=solids.find(mesh=>mesh.userData.id===$('#csgTargetSelect').value&&mesh!==base);
+    if(!base||!tool)return showToast(L('Selecione duas peças para a operação.', 'Select two parts for the operation.'));
+    let a,b;
+    try{a=booleanOperand(base);b=booleanOperand(tool);const left=CSG.fromMesh(a),right=CSG.fromMesh(b);const result=opType==='union'?left.union(right):opType==='intersect'?left.intersect(right):left.subtract(right);commitCsg(result,base,[base,tool],`${base.userData.name}_${opType}`);showToast(L('Operação booleana concluída.', 'Boolean operation completed.'));}
+    catch(error){showToast(error.message);}
+    finally{if(a)disposeMesh(a);if(b)disposeMesh(b);}
+  }
+  function drillQuickHoleOnSelected(holeDia=4.2) {
+    flushEdits();
+    if(!selectedSolid)return showToast(L('Selecione uma peça primeiro.', 'Select a part first.'));
+    if(!Number.isFinite(holeDia)||holeDia<0.5||holeDia>200)throw new Error(L('Diâmetro deve estar entre 0,5 e 200 mm.', 'Diameter must be between 0.5 and 200 mm.'));
+    const target=selectedSolid,box=new THREE.Box3().setFromObject(target),center=new THREE.Vector3(),size=new THREE.Vector3();box.getCenter(center);box.getSize(size);
+    let base;const tool=new THREE.Mesh(new THREE.CylinderGeometry(holeDia/2,holeDia/2,Math.max(size.y+4,10),48),new THREE.MeshStandardMaterial());tool.position.copy(center);tool.updateMatrix();
+    try{base=booleanOperand(target);const result=CSG.fromMesh(base).subtract(CSG.fromMesh(tool));commitCsg(result,target,[target],`${target.userData.name}_Bore${holeDia}`);showToast(L(`Furo Ø${holeDia} mm aplicado.`, `Bore Ø${holeDia} mm applied.`));}
+    finally{if(base)disposeMesh(base);disposeMesh(tool);}
   }
 
   // === PATTERNS, MIRROR & DUPLICATE ===
   function cloneSolidMesh(src, offsetVec) {
+    if(solids.length>=CadProject.MAX_SOLIDS)throw new Error(L("Limite de peças atingido.","Part limit reached."));
+    ensureCapacity(src.geometry);
     const geom = src.geometry.clone();
     const mat = src.material.clone();
     const copy = new THREE.Mesh(geom, mat);
@@ -933,7 +895,7 @@
     copy.receiveShadow = true;
     copy.userData = {
       ...JSON.parse(JSON.stringify(src.userData)),
-      id: `solid_${idCounter++}`,
+      id: newId(),
       name: `${src.userData.name}_Copy`,
     };
     attachCadEdges(copy);
@@ -1274,6 +1236,7 @@
 
   skCanvas.addEventListener("pointerdown", (e) => {
     const r = skCanvas.getBoundingClientRect();
+    skCanvas.setPointerCapture(e.pointerId);
     skDragStart = screenToSketchMm(e.clientX - r.left, e.clientY - r.top);
     skCurrentMouse = skDragStart;
     drawSketch2D();
@@ -1296,6 +1259,7 @@
   });
 
   function openSketch2D() {
+    editingSketchId = null;
     sketchOverlay.hidden = false;
     if (skEntities.length === 0) {
       // Seed with a default 60x40 base plate with 2 holes so user sees an instant example
@@ -1305,6 +1269,7 @@
         { kind: "circle", x: 22, y: 0, r: 5, isHole: true },
       ];
     }
+    renderSketchFields();
     resizeSketchCanvas();
   }
 
@@ -1320,28 +1285,10 @@
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 
-  function exportStl(binary = true) {
-    const visible = solids.filter((s) => s.visible);
-    if (!visible.length) {
-      showToast(L("Nenhuma peça na cena para exportar.", "No parts in scene to export."));
-      return;
-    }
-    const group = new THREE.Group();
-    visible.forEach((m) => {
-      const clone = new THREE.Mesh(m.geometry.clone());
-      clone.position.copy(m.position);
-      clone.rotation.copy(m.rotation);
-      clone.scale.copy(m.scale);
-      clone.updateMatrix();
-      group.add(clone);
-    });
-    const exporter = new THREE.STLExporter();
-    const data = exporter.parse(group, { binary });
-    const blob = new Blob([data], {
-      type: binary ? "application/octet-stream" : "text/plain;charset=utf-8",
-    });
-    downloadBlob(blob, "modelo_3dcad.stl");
-    showToast(L("Arquivo .STL exportado com sucesso!", ".STL file exported!"));
+  function exportStl() {
+    flushEdits();
+    try { downloadBlob(CadMesh.stl(solids), "modelo_3dcad.stl"); showToast(L("STL exportado em mm, Z vertical.", "STL exported in mm, Z up.")); }
+    catch (error) { showToast(error.message); }
   }
 
   // === UI EVENT BINDINGS ===
@@ -1407,44 +1354,26 @@
     });
   });
 
-  // Transform & Name Listeners
-  $("#inspNameInput")?.addEventListener("input", (e) => {
+  bindEdit($("#inspNameInput"), value => {
     if (!selectedSolid) return;
-    selectedSolid.userData.name = e.target.value || "Solid";
-    renderFeatureTree();
-    updateTelemetryAndPrintMetrics();
-    syncMcpConsole();
+    if (!value.trim() || value.length > 160) throw new Error(L("Nome deve ter 1–160 caracteres", "Name must have 1–160 characters"));
+    selectedSolid.userData.name = value;
+    renderFeatureTree(); updateTelemetryAndPrintMetrics(); syncMcpConsole();
   });
-
-  ["posX", "posY", "posZ", "rotX", "rotY", "rotZ"].forEach((id) => {
-    $("#" + id)?.addEventListener("input", () => {
-      if (!selectedSolid) return;
-      selectedSolid.position.set(
-        Number($("#posX").value) || 0,
-        Number($("#posZ").value) || 0,
-        Number($("#posY").value) || 0
-      );
-      selectedSolid.rotation.set(
-        THREE.MathUtils.degToRad(Number($("#rotX").value) || 0),
-        THREE.MathUtils.degToRad(Number($("#rotZ").value) || 0),
-        THREE.MathUtils.degToRad(Number($("#rotY").value) || 0)
-      );
-      updateTelemetryAndPrintMetrics();
-      syncMcpConsole();
-    });
-  });
-
-  $$("#colorSwatches .color-swatch").forEach((sw) => {
-    sw.addEventListener("click", () => {
-      if (!selectedSolid) return;
-      const hex = sw.dataset.color;
-      selectedSolid.userData.color = hex;
-      selectedSolid.material.color.set(hex);
-      renderFeatureTree();
-      renderInspectorFields();
-      syncMcpConsole();
-    });
-  });
+  ["posX", "posY", "posZ", "rotX", "rotY", "rotZ"].forEach(id => bindEdit($("#" + id), () => {
+    const values = ["posX", "posY", "posZ", "rotX", "rotY", "rotZ"].map(id => Number($("#" + id).value));
+    if (values.some(n => !Number.isFinite(n) || Math.abs(n) > 100000)) throw new Error(L("Transformação inválida", "Invalid transform"));
+    selectedSolid.position.set(values[0], values[2], values[1]);
+    selectedSolid.rotation.set(...[values[3], values[5], values[4]].map(THREE.MathUtils.degToRad));
+    updateTelemetryAndPrintMetrics(); syncMcpConsole();
+  }, true));
+  $$("#colorSwatches .color-swatch").forEach(sw => sw.addEventListener("click", () => {
+    if (!selectedSolid) return;
+    flushEdits(); pushUndoSnapshot();
+    selectedSolid.userData.color = sw.dataset.color;
+    selectedSolid.material.color.set(sw.dataset.color);
+    refreshAllUI();
+  }));
 
   // Boolean & Pattern Buttons
   $("#btnCsgUnion").onclick = () => runBooleanOp("union");
@@ -1453,7 +1382,7 @@
   $("#inspCsgUnion").onclick = () => runBooleanOp("union");
   $("#inspCsgSubtract").onclick = () => runBooleanOp("subtract");
   $("#inspCsgIntersect").onclick = () => runBooleanOp("intersect");
-  $("#btnDrillQuickHole").onclick = () => drillQuickHoleOnSelected(4.2);
+  $("#btnDrillQuickHole").onclick = () => drillQuickHoleOnSelected(Number($("#drillDiameter").value));
 
   $("#btnDuplicateSolid").onclick = $("#inspDuplicateBtn").onclick = () => {
     if (!selectedSolid) return;
@@ -1470,43 +1399,44 @@
     removeSolid(selectedSolid);
   };
 
-  $("#btnLinearPattern").onclick = () => {
+  function patternOptions() {
+    const count = Number($('#patternCount').value), step = Number($('#patternStep').value), cx = Number($('#patternCenterX').value), cy = Number($('#patternCenterY').value);
+    if (!Number.isInteger(count) || count < 2 || count > 32 || solids.length + count - 1 > CadProject.MAX_SOLIDS || !Number.isFinite(step) || step < 0.1 || step > 1000 || ![cx,cy].every(n=>Number.isFinite(n)&&Math.abs(n)<=10000)) throw new Error(L('Configuração de padrão inválida.', 'Invalid pattern settings.'));
+    if(solids.reduce((sum,m)=>sum+triangleCount(m.geometry),0)+(count-1)*triangleCount(selectedSolid.geometry)>CadMesh.MAX_TRIANGLES) throw new Error(L("Padrão excede o limite de malha.","Pattern exceeds the mesh limit."));
+    return {count,step,cx,cy};
+  }
+  $('#btnLinearPattern').onclick = () => {
     if (!selectedSolid) return;
+    const {count,step} = patternOptions(), base = selectedSolid;
     pushUndoSnapshot();
-    const box = new THREE.Box3().setFromObject(selectedSolid);
-    const sz = new THREE.Vector3();
-    box.getSize(sz);
-    const stepX = Math.max(sz.x + 8, 20);
-    cloneSolidMesh(selectedSolid, new THREE.Vector3(stepX, 0, 0));
-    const c2 = cloneSolidMesh(selectedSolid, new THREE.Vector3(stepX * 2, 0, 0));
-    selectSolid(c2);
-    refreshAllUI();
-    showToast(L("Padrão Linear (3×) gerado!", "Linear Pattern (3×) created!"));
+    for (let i = 1; i < count; i++) cloneSolidMesh(base, new THREE.Vector3(step * i,0,0));
+    timelineStep = solids.length; refreshAllUI();
+    showToast(L(`Padrão de ${count} peças criado.`, `${count}-part pattern created.`));
   };
-
-  $("#btnCircularPattern").onclick = () => {
+  $('#btnCircularPattern').onclick = () => {
     if (!selectedSolid) return;
+    const {count,cx,cy} = patternOptions(), base = selectedSolid;
+    const dx = base.position.x-cx, dz = base.position.z-cy;
+    if (Math.hypot(dx,dz)<0.01) throw new Error(L('A peça está no centro circular. Mova a peça ou ajuste o centro.', 'Part is at the circular center. Move the part or adjust the center.'));
     pushUndoSnapshot();
-    const basePos = selectedSolid.position.clone();
-    const r = Math.max(32, Math.hypot(basePos.x, basePos.z));
-    for (let i = 1; i < 4; i++) {
-      const ang = (i * Math.PI) / 2;
-      const copy = cloneSolidMesh(selectedSolid, new THREE.Vector3(0, 0, 0));
-      copy.position.set(Math.cos(ang) * r, basePos.y, Math.sin(ang) * r);
+    for(let i=1;i<count;i++){
+      const angle = i*Math.PI*2/count, copy = cloneSolidMesh(base,new THREE.Vector3());
+      copy.position.set(cx+dx*Math.cos(angle)+dz*Math.sin(angle),base.position.y,cy-dx*Math.sin(angle)+dz*Math.cos(angle));
+      copy.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),angle));
     }
-    refreshAllUI();
-    showToast(L("Padrão Circular (4×) gerado!", "Circular Pattern (4×) created!"));
+    timelineStep=solids.length; refreshAllUI();
+    showToast(L('Padrão circular criado a partir da posição original.', 'Circular pattern created from the original position.'));
   };
-
-  $("#btnMirrorX").onclick = () => {
+  $('#btnMirrorX').onclick = () => {
     if (!selectedSolid) return;
+    const plane = Number($('#mirrorPlaneX').value);
+    if(!Number.isFinite(plane)||Math.abs(plane)>10000) throw new Error(L('Plano de espelho inválido.', 'Invalid mirror plane.'));
     pushUndoSnapshot();
-    const copy = cloneSolidMesh(selectedSolid, new THREE.Vector3(0, 0, 0));
-    copy.position.x = -selectedSolid.position.x || 35;
-    copy.scale.x *= -1;
-    selectSolid(copy);
-    refreshAllUI();
-    showToast(L("Espelhamento concluído!", "Mirrored part created!"));
+    selectedSolid.updateMatrix();
+    const reflection=new THREE.Matrix4().makeScale(-1,1,1);reflection.setPosition(plane*2,0,0);
+    const transform=reflection.multiply(selectedSolid.matrix);
+    const copy=cloneSolidMesh(selectedSolid,new THREE.Vector3());transform.decompose(copy.position,copy.quaternion,copy.scale);
+    selectSolid(copy); refreshAllUI(); showToast(L('Espelho no plano configurado criado.', 'Mirror on the configured plane created.'));
   };
 
   // Sketch 2D Controls
@@ -1528,13 +1458,14 @@
       showToast(L("Desenhe pelo menos uma forma no esboço.", "Draw at least one shape."));
       return;
     }
+    const h = Number($("#sketchExtrudeHeight").value);
+    const params = CadProject.validateParams("SKETCH_EXTRUDE", {height:h,bevel:0,entities:JSON.parse(JSON.stringify(skEntities))});
+    const preview = CadGenerators.buildParametricGeometry("SKETCH_EXTRUDE",params); preview.dispose();
     pushUndoSnapshot();
-    const h = Math.max(1, Number($("#sketchExtrudeHeight")?.value) || 18);
-    createParametricSolid("SKETCH_EXTRUDE", {
-      name: `Sketch3D_${solids.length + 1}`,
-      color: "#f97316",
-      params: { height: h, bevel: 0.4, entities: JSON.parse(JSON.stringify(skEntities)) },
-    });
+    const existing = solids.find(mesh=>mesh.userData.id===editingSketchId);
+    if(existing){existing.userData.params=params;rebuildSolidGeometry(existing);selectSolid(existing);refreshAllUI();}
+    else createParametricSolid("SKETCH_EXTRUDE", {name:`Sketch3D_${solids.length+1}`,color:'#f97316',params});
+    editingSketchId=null;
     sketchOverlay.hidden = true;
     showToast(L("Esboço 2D extrudado para 3D!", "2D Sketch extruded to 3D!"));
   };
@@ -1580,14 +1511,14 @@
   }
 
   $("#hudZoomFit").onclick = zoomFitScene;
-  $("#hudDropBed").onclick = dropSelectedToBed;
-  $("#btnLayFlatBed").onclick = dropSelectedToBed;
+  $("#hudDropBed").onclick = $("#btnLayFlatBed").onclick = () => { flushEdits(); pushUndoSnapshot(); dropSelectedToBed(); };
   $("#btnRotX90").onclick = () => rotateSelected90("x");
   $("#btnRotY90").onclick = () => rotateSelected90("y");
   $("#btnRotZ90").onclick = () => rotateSelected90("z");
 
   $("#hudCenterBed").onclick = () => {
     if (!selectedSolid) return;
+    flushEdits(); pushUndoSnapshot();
     selectedSolid.position.x = 0;
     selectedSolid.position.z = 0;
     renderInspectorFields();
@@ -1608,7 +1539,7 @@
     $("#hudMeasureBtn").classList.toggle("active", measureMode);
     measurePoints = [];
     while (measureGroup.children.length) {
-      measureGroup.remove(measureGroup.children[0]);
+      const child = measureGroup.children[0]; measureGroup.remove(child); disposeMesh(child);
     }
     if (!measureMode) $("#telemetryMeasure").hidden = true;
     else
@@ -1645,146 +1576,119 @@
     slicePlane.constant = (pct / 100) * maxH;
   });
 
-  // Export Suite Buttons
-  $("#btnQuickExportStl").onclick = $("#printExportStlBin").onclick = () => exportStl(true);
-  $("#btnExport3mf").onclick = $("#printExport3mf").onclick = () => {
-    const vis = solids.filter((s) => s.visible);
-    if (!vis.length) return showToast(L("Cena vazia.", "Empty scene."));
-    downloadBlob(CadGenerators.exportMeshesTo3MF(vis), "modelo_3dcad.3mf");
-    showToast(L("Arquivo .3MF (Bambu/Prusa/Orca) exportado!", ".3MF file exported!"));
-  };
-  $("#btnExportStep").onclick = $("#printExportStep").onclick = () => {
-    const vis = solids.filter((s) => s.visible);
-    if (!vis.length) return showToast(L("Cena vazia.", "Empty scene."));
-    downloadBlob(CadGenerators.exportMeshesToSTEP(vis), "modelo_3dcad.step");
-    showToast(L("Arquivo .STEP (ISO-10303-21) exportado!", ".STEP file exported!"));
-  };
-  $("#btnExportObj").onclick = $("#printExportObj").onclick = () => {
-    const vis = solids.filter((s) => s.visible);
-    if (!vis.length) return showToast(L("Cena vazia.", "Empty scene."));
-    downloadBlob(CadGenerators.exportMeshesToOBJ(vis), "modelo_3dcad.obj");
-    showToast(L("Arquivo .OBJ exportado!", ".OBJ file exported!"));
-  };
-  $("#btnExportJson").onclick = () => {
-    const blob = new Blob([$("#mcpJsonConsole").value], {
-      type: "application/json;charset=utf-8",
-    });
-    downloadBlob(blob, "projeto_3dcad.json");
-  };
-
-  // File Import (.STL or .JSON)
-  $("#fileImportInput")?.addEventListener("change", (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    if (file.name.toLowerCase().endsWith(".json")) {
-      const r = new FileReader();
-      r.onload = () => {
-        try {
-          const parsed = JSON.parse(r.result);
-          if (Array.isArray(parsed.solids)) {
-            pushUndoSnapshot();
-            restoreSceneFromItems(parsed.solids);
-            zoomFitScene();
-            showToast(L("Projeto paramétrico importado!", "Parametric project imported!"));
-          }
-        } catch (err) {
-          showToast(err.message);
-        }
-      };
-      r.readAsText(file);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        pushUndoSnapshot();
-        const loader = new THREE.STLLoader();
-        const geom = loader.parse(reader.result);
-        geom.computeVertexNormals();
-        geom.center();
-        geom.computeBoundingBox();
-        const h = geom.boundingBox.max.y - geom.boundingBox.min.y;
-        const mat = new THREE.MeshStandardMaterial({
-          color: 0x38bdf8,
-          roughness: 0.38,
-          metalness: 0.15,
-          clippingPlanes: [slicePlane],
-          side: THREE.DoubleSide,
-        });
-        const mesh = new THREE.Mesh(geom, mat);
-        mesh.position.set(0, h / 2, 0);
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        mesh.userData = {
-          id: `stl_${idCounter++}`,
-          type: "STL_IMPORT",
-          name: file.name.replace(/\.stl$/i, ""),
-          color: "#38bdf8",
-          params: {},
-          isParametric: false,
-        };
-        attachCadEdges(mesh);
-        applyVisualStyleToMesh(mesh);
-        scene.add(mesh);
-        solids.push(mesh);
-        selectSolid(mesh);
-        zoomFitScene();
-        refreshAllUI();
-        showToast(L(`STL importado: ${file.name}`, `Imported STL: ${file.name}`));
-      } catch (err) {
-        showToast(err.message);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  });
-
-  // AI Copilot & MCP Console
-  function executeAiPrompt(text) {
-    const cmd = CadGenerators.parseCadPrompt(text);
-    if (!cmd) {
-      showToast(L("Digite uma descrição da peça.", "Enter a part description."));
-      return;
-    }
-    if (cmd.action === "DRILL_HOLE") {
-      drillQuickHoleOnSelected(cmd.diameter);
-      return;
-    }
-    pushUndoSnapshot();
-    createParametricSolid(cmd.type, {
-      name: cmd.name,
-      color: cmd.color,
-      params: cmd.params,
-    });
-    zoomFitScene();
-    showToast(L(`IA criou: ${cmd.name}`, `AI created: ${cmd.name}`));
+  function exportDocument() {
+    flushEdits();
+    downloadBlob(new Blob([JSON.stringify(CadProject.document(serializeSceneState()), null, 2)], {type:'application/json;charset=utf-8'}), 'projeto_3dcad.json');
   }
+  function exportFormat(format) {
+    flushEdits();
+    try {
+      const blob = format === '3mf' ? CadGenerators.exportMeshesTo3MF(solids) : format === 'step' ? CadGenerators.exportMeshesToSTEP(solids) : CadGenerators.exportMeshesToOBJ(solids);
+      downloadBlob(blob, `modelo_3dcad.${format}`);
+      showToast(format === 'step' ? L('STEP facetado exportado: superfícies trianguladas, sem histórico.', 'Faceted STEP exported: triangulated surfaces, no history.') : L('Arquivo exportado.', 'File exported.'));
+    } catch (error) { showToast(error.message); }
+  }
+  $('#btnQuickExportStl').onclick = $('#printExportStlBin').onclick = exportStl;
+  $('#btnExport3mf').onclick = $('#printExport3mf').onclick = () => exportFormat('3mf');
+  $('#btnExportStep').onclick = $('#printExportStep').onclick = () => exportFormat('step');
+  $('#btnExportObj').onclick = $('#printExportObj').onclick = () => exportFormat('obj');
+  $('#btnExportJson').onclick = exportDocument;
+  $('#btnSaveProject').onclick = exportDocument;
 
-  $("#btnRunAiPrompt").onclick = () => executeAiPrompt($("#aiPromptInput").value);
-  $$("[data-prompt]").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      $("#aiPromptInput").value = chip.dataset.prompt;
-      executeAiPrompt(chip.dataset.prompt);
-    });
+  async function importFile(file) {
+    if (!file) return;
+    if (file.size > CadProject.MAX_BYTES) throw new Error(L('Arquivo excede 32 MB.', 'File exceeds 32 MB.'));
+    flushEdits();
+    if (/\.json$/i.test(file.name)) {
+      const doc = CadProject.read(await file.text());
+      // Restore stages every object before committing. Invalid input leaves the scene intact.
+      pushUndoSnapshot(); restoreSceneFromItems(doc.solids);
+    } else if (/\.stl$/i.test(file.name)) {
+      const bytes = await file.arrayBuffer();
+      if (bytes.byteLength < 15) throw new Error(L('STL vazio ou inválido.', 'Empty or invalid STL.'));
+      if (bytes.byteLength >= 84) {
+        const count = new DataView(bytes).getUint32(80, true);
+        if (84 + count * 50 === bytes.byteLength && count > CadMesh.MAX_TRIANGLES) throw new Error(L('STL excede 250.000 triângulos.', 'STL exceeds 250,000 triangles.'));
+      }
+      const raw = new THREE.STLLoader().parse(bytes);
+      try {
+        if (raw.attributes.position.count / 3 > CadMesh.MAX_TRIANGLES) throw new Error(L('Malha grande demais.', 'Mesh is too large.'));
+        raw.rotateX(-Math.PI / 2); // CAD Z-up -> internal Y-up, inverse of every exporter.
+        const normalized = CadMesh.fromMesh(new THREE.Mesh(raw), false);
+        if (!normalized.triangles.length) throw new Error(L('STL sem triângulos válidos.', 'STL has no valid triangles.'));
+        const geometry = CadMesh.toGeometry(normalized);
+        const record = {type:'STL_IMPORT',name:file.name.replace(/\.stl$/i,'').slice(0,160),color:'#38bdf8',params:{},pos:[0,0,0],geometry:{positions:Array.from(geometry.attributes.position.array),index:Array.from(geometry.index.array)}};
+        geometry.dispose();
+        const mesh = buildSolid(record.type, record);
+        try { if(solids.length>=CadProject.MAX_SOLIDS)throw new Error(L("Limite de peças atingido.","Part limit reached."));ensureCapacity(mesh.geometry); } catch(error) {disposeMesh(mesh);throw error;}
+        pushUndoSnapshot(); scene.add(mesh); solids.push(mesh); timelineStep = solids.length;
+        selectSolid(mesh); refreshAllUI();
+      } finally { raw.dispose(); }
+    } else throw new Error(L('Escolha um arquivo STL ou JSON.', 'Choose an STL or JSON file.'));
+    zoomFitScene(); showToast(L('Projeto importado. Posições preservadas.', 'Project imported. Positions preserved.'));
+  }
+  $('#fileImportInput').addEventListener('change', async e => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    try { await importFile(file); } catch (error) { showToast(error.message); }
   });
 
-  $("#btnApplyMcpJson").onclick = () => {
+  let proposedCommand = null;
+  function previewCommand(text) {
     try {
-      const parsed = JSON.parse($("#mcpJsonConsole").value);
-      if (!Array.isArray(parsed.solids)) throw new Error("Campo 'solids' ausente no JSON MCP.");
-      pushUndoSnapshot();
-      restoreSceneFromItems(parsed.solids);
-      zoomFitScene();
-      showToast(L("Cena reconstruída via MCP JSON!", "Scene rebuilt via MCP JSON!"));
-    } catch (e) {
-      showToast(e.message);
+      proposedCommand = CadGenerators.parseCadPrompt(text);
+      if (!proposedCommand) throw new Error(L('Comando não reconhecido. Use um exemplo ou parâmetros da peça.', 'Unknown command. Use an example or the part parameters.'));
+      const cmd = proposedCommand;
+      if (cmd.action !== 'CREATE' && !selectedSolid) throw new Error(L('Selecione uma peça primeiro.', 'Select a part first.'));
+      if (cmd.action === 'DRILL_HOLE' && (!Number.isFinite(cmd.diameter) || cmd.diameter < 0.5 || cmd.diameter > 200)) throw new Error(L('Diâmetro de furo inválido.', 'Invalid bore diameter.'));
+      if (cmd.action === 'MODIFY') {
+        if (!selectedSolid.userData.isParametric) throw new Error(L('Malhas importadas/CSG não têm dimensões paramétricas editáveis.', 'Imported/CSG meshes have no editable parametric dimensions.'));
+        cmd.params = CadProject.validateParams(selectedSolid.userData.type, {...selectedSolid.userData.params,...cmd.params});
+      }
+      cmd.target = cmd.action === 'CREATE' ? null : selectedSolid.userData.id;
+      $('#commandPreview').textContent = JSON.stringify({action:cmd.action,type:cmd.type,target:cmd.target,params:cmd.params,diameter:cmd.diameter},null,2);
+      $('#btnApplyCommand').disabled = false;
+      showToast(L('Confira a ação e clique em Aplicar.', 'Review the action and click Apply.'));
+    } catch (error) {
+      proposedCommand = null; $('#commandPreview').textContent = error.message; $('#btnApplyCommand').disabled = true; showToast(error.message);
     }
+  }
+  function applyCommand() {
+    const cmd = proposedCommand;
+    if (!cmd) return;
+    try {
+      flushEdits();
+      if (cmd.target && selectedSolid?.userData.id !== cmd.target) throw new Error(L('A seleção mudou. Interprete o comando novamente.', 'Selection changed. Interpret the command again.'));
+      if (cmd.action === 'DRILL_HOLE') drillQuickHoleOnSelected(cmd.diameter);
+      else if (cmd.action === 'MODIFY') {
+        const old = selectedSolid.userData.params;
+        const next = CadGenerators.buildParametricGeometry(selectedSolid.userData.type, cmd.params); next.dispose();
+        pushUndoSnapshot(); selectedSolid.userData.params = cmd.params;
+        try { rebuildSolidGeometry(selectedSolid); refreshAllUI(); } catch (error) { selectedSolid.userData.params = old; throw error; }
+      } else { pushUndoSnapshot(); createParametricSolid(cmd.type,{params:cmd.params,color:cmd.color}); }
+      proposedCommand = null; $('#btnApplyCommand').disabled = true;
+      zoomFitScene(); showToast(L('Comando aplicado.', 'Command applied.'));
+    } catch (error) { showToast(error.message); }
+  }
+  $('#btnRunAiPrompt').onclick = () => previewCommand($('#aiPromptInput').value);
+  $('#btnApplyCommand').onclick = applyCommand;
+  $$('[data-prompt]').forEach(chip => chip.addEventListener('click', () => {
+    $('#aiPromptInput').value = lang === 'en' ? chip.dataset.promptEn || chip.dataset.prompt : chip.dataset.prompt;
+    previewCommand($('#aiPromptInput').value);
+  }));
+  $('#aiPromptInput').addEventListener('input',()=>{ proposedCommand = null; $('#btnApplyCommand').disabled = true; });
+  $('#btnApplyMcpJson').onclick = () => {
+    try { const doc = CadProject.read($('#mcpJsonConsole').value); flushEdits(); pushUndoSnapshot(); restoreSceneFromItems(doc.solids); zoomFitScene(); showToast(L('Projeto JSON validado e aberto.', 'JSON project validated and opened.')); }
+    catch(error) { showToast(error.message); }
   };
-  $("#btnRefreshMcpJson").onclick = syncMcpConsole;
-  $("#btnCopyMcp").onclick = () => {
-    navigator.clipboard
-      ?.writeText($("#mcpJsonConsole").value)
-      .then(() => showToast(L("JSON MCP copiado!", "MCP JSON copied!")));
+  $('#btnRefreshMcpJson').onclick = renderProjectConsole;
+  $('#mcpJsonConsole').addEventListener('input',()=>{ $('#mcpJsonConsole').dataset.previewOnly='false';$('#btnApplyMcpJson').disabled=false; });
+  $('#btnCopyMcp').onclick = async () => {
+    try { if (!navigator.clipboard) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText($('#mcpJsonConsole').dataset.previewOnly==='true'?JSON.stringify(CadProject.document(serializeSceneState()),null,2):$('#mcpJsonConsole').value); showToast(L('JSON copiado.', 'JSON copied.')); }
+    catch { showToast(L('Selecione o JSON e use Ctrl+C.', 'Select the JSON and use Ctrl+C.')); }
+  };
+  $('#btnRecoverProject').onclick = async () => {
+    try { const backup = await projectStore.load(true); if (!backup) throw new Error(L('Nenhuma cópia anterior disponível.', 'No previous copy available.')); flushEdits(); pushUndoSnapshot(); restoreSceneFromItems(backup.solids); zoomFitScene(); showToast(L('Cópia anterior recuperada. Desfazer restaura a cena atual.', 'Previous copy recovered. Undo restores the current scene.')); }
+    catch (error) { showToast(error.message); }
   };
 
   // Demo Projects & Timeline Scrubber
@@ -1817,11 +1721,12 @@
   $("#tlPlay").onclick = () => {
     if (!solids.length) return;
     let step = 0;
+    clearInterval(timelineTimer);
     applyTimelineStep(0);
-    const timer = setInterval(() => {
+    timelineTimer = setInterval(() => {
       step++;
       applyTimelineStep(step);
-      if (step >= solids.length) clearInterval(timer);
+      if (step >= solids.length) clearInterval(timelineTimer);
     }, 320);
   };
 
@@ -1830,6 +1735,7 @@
   $("#btnRedo").onclick = redo;
 
   window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { if (!$("#modal4uLabs").hidden) closeModal($("#modal4uLabs")); if (!$("#helpModal").hidden) closeModal($("#helpModal")); sketchOverlay.hidden = true; }
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "")) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
       e.preventDefault();
@@ -1853,6 +1759,7 @@
   });
 
   function applyLanguage() {
+    flushEdits();
     document.documentElement.lang = lang === "pt" ? "pt-BR" : "en";
     $("#langPt").classList.toggle("active", lang === "pt");
     $("#langEn").classList.toggle("active", lang === "en");
@@ -1861,26 +1768,115 @@
       const k = el.dataset.i18n;
       if (dict[k]) el.textContent = dict[k];
     });
+    applyExtraTranslations();
     renderInspectorFields();
     renderFeatureTree();
     updateTelemetryAndPrintMetrics();
+    if ($("#autoSaveBadge").dataset.state) setSaveStatus($("#autoSaveBadge").dataset.state);
   }
 
   $("#langPt").onclick = () => {
     lang = "pt";
-    localStorage.setItem("3dcad_lang", "pt");
+    try { localStorage.setItem("3dcad_lang", "pt"); } catch {}
     applyLanguage();
   };
   $("#langEn").onclick = () => {
     lang = "en";
-    localStorage.setItem("3dcad_lang", "en");
+    try { localStorage.setItem("3dcad_lang", "en"); } catch {}
     applyLanguage();
   };
 
+  let deferredInstall = null;
+  let modalReturnFocus = null;
+  function openModal(modal) {
+    modalReturnFocus = document.activeElement;
+    modal.hidden = false;
+    modal.querySelector('button, a, input, textarea')?.focus();
+  }
+  function closeModal(modal) { modal.hidden = true; modalReturnFocus?.focus(); }
+  [$('#modal4uLabs'), $('#helpModal')].forEach(modal => {
+    modal.addEventListener('click', e => { if(e.target === modal) closeModal(modal); });
+    modal.addEventListener('keydown', e => {
+      if(e.key === 'Escape'){ e.preventDefault();closeModal(modal);return; }
+      if(e.key !== 'Tab') return;
+      const focusable=[...modal.querySelectorAll('button, a[href], input, select, textarea, [tabindex="0"]')].filter(el=>!el.disabled&&!el.hidden);
+      const first=focusable[0],last=focusable.at(-1);
+      if(e.shiftKey && document.activeElement===first){e.preventDefault();last?.focus();}
+      else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}
+    });
+  });
+  $('#btnOpen4uModal').onclick = () => openModal($('#modal4uLabs'));
+  $('#btnClose4uModal').onclick = () => closeModal($('#modal4uLabs'));
+  $('#btnHelp').onclick = () => openModal($('#helpModal'));
+  $('#btnCloseHelp').onclick = () => closeModal($('#helpModal'));
+  const isStandalone=()=>window.matchMedia?.('(display-mode: standalone)').matches||navigator.standalone===true;
+  $('#btnInstall').hidden = isStandalone();
+  window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;$('#btnInstall').hidden=isStandalone();});
+  window.addEventListener('appinstalled',()=>{deferredInstall=null;$('#btnInstall').hidden=true;});
+  $('#btnInstall').onclick = async () => {
+    if(deferredInstall){ const event=deferredInstall;deferredInstall=null;await event.prompt();await event.userChoice; }
+    else { openModal($('#helpModal')); $('#helpModal').querySelector('[data-i18n="helpInstallTitle"]')?.scrollIntoView({block:'start'}); }
+  };
+  $('#printScope').addEventListener('input',updateTelemetryAndPrintMetrics);
+  $('#btnValidateMesh').onclick = () => {
+    if(!selectedSolid) return showToast(L('Selecione uma peça.', 'Select a part.'));
+    const result=CadMesh.fromMesh(selectedSolid,false),d=result.diagnostics;
+    $('#meshReport').textContent=L(`Malha: ${result.triangles.length} triângulos; ${d.boundaryEdges} arestas abertas; ${d.nonManifoldEdges} não manifold; ${d.removedDegenerate} degenerados removidos; ${d.splitEdges} junções corrigidas na exportação.`, `Mesh: ${result.triangles.length} triangles; ${d.boundaryEdges} open edges; ${d.nonManifoldEdges} non-manifold; ${d.removedDegenerate} degenerate triangles removed; ${d.splitEdges} junctions repaired for export.`);
+  };
+
+  let editingSketchId = null;
+  function renderSketchFields() {
+    const container=$('#sketchEntityFields'); container.replaceChildren();
+    skEntities.forEach((entity,index)=>{
+      const row=document.createElement('fieldset'); const legend=document.createElement('legend');
+      legend.textContent=`${index+1} · ${entity.kind}${entity.isHole?L(' · furo',' · hole'):''}`;row.append(legend);
+      for(const key of ['x','y',...(entity.r!==undefined?['r']:['w','h'])]){
+        const label=document.createElement('label');label.textContent=`${{x:'X',y:'Y',r:'R',w:'X',h:'Y'}[key]} (mm)`;
+        const input=document.createElement('input');input.type='number';input.className='num-input';input.step='0.1';input.value=entity[key];input.id=`sk_${index}_${key}`;label.htmlFor=input.id;
+        input.addEventListener('change',()=>{
+          const candidate={...entity,[key]:Number(input.value)};
+          try{CadProject.validateParams('SKETCH_EXTRUDE',{height:18,bevel:0,entities:skEntities.map((e,i)=>i===index?candidate:e)});Object.assign(entity,candidate);input.setCustomValidity('');drawSketch2D();}
+          catch(error){input.setCustomValidity(error.message);input.reportValidity();input.value=entity[key];}
+        });
+        row.append(label,input);
+      }
+      const del=document.createElement('button');del.type='button';del.className='hdr-btn';del.textContent=L('Excluir','Delete');
+      del.onclick=()=>{skEntities.splice(index,1);renderSketchFields();drawSketch2D();};row.append(del);container.append(row);
+    });
+  }
+  $('#btnEditSketch').onclick=()=>{
+    if(selectedSolid?.userData.type!=='SKETCH_EXTRUDE')return showToast(L('Selecione uma extrusão de esboço.', 'Select a sketch extrusion.'));
+    editingSketchId=selectedSolid.userData.id;skEntities=JSON.parse(JSON.stringify(selectedSolid.userData.params.entities));
+    $('#sketchExtrudeHeight').value=selectedSolid.userData.params.height;
+    sketchOverlay.hidden=false;renderSketchFields();resizeSketchCanvas();
+  };
+  $('#btnSketchAddNumeric').onclick=()=>{
+    const kind=skTool==='hex'?'polygon':skTool==='hole'?'circle':skTool;
+    skEntities.push({kind,x:0,y:0,...(['circle','polygon'].includes(kind)?{r:skTool==='hole'?3:10,...(kind==='polygon'?{sides:6}:{})}:{w:30,h:20}),isHole:skTool==='hole'});
+    renderSketchFields();drawSketch2D();$('#sketchEntityFields').parentElement.open=true;
+  };
+  // Keep numeric entry and pointer drawing in sync.
+  skCanvas.addEventListener('pointerup',renderSketchFields);
+  skCanvas.addEventListener('pointercancel',()=>{skDragStart=null;skCurrentMouse=null;drawSketch2D();});
+  $('#btnSketchClear').addEventListener('click',renderSketchFields);
+  document.addEventListener('click',()=>flushEdits(),true);
+  // Guard direct toolbar actions so invalid settings do not leave an uncaught exception.
+  $$('button').forEach(button=>{
+    const action=button.onclick;
+    if(action)button.onclick=function(event){try{const value=action.call(this,event);value?.catch?.(error=>showToast(error.message));return value;}catch(error){showToast(error.message);}};
+  });
+  window.addEventListener('pagehide',()=>{
+    flushEdits(); clearTimeout(saveTimer);
+    if(!isBooting&&savedScene!=='load-error')projectStore.save(CadProject.document(serializeSceneState())).catch(()=>{});
+  });
+  window.addEventListener('beforeunload',event=>{
+    if($('#autoSaveBadge').dataset.state==='pending'||$('#autoSaveBadge').dataset.state==='error'){event.preventDefault();event.returnValue='';}
+  });
+
   // Resize & Animation Loop
   function onResize() {
-    const w = viewport.clientWidth || window.innerWidth;
-    const h = (viewport.clientHeight || window.innerHeight) - 30;
+    const w = Math.max(1, viewport.clientWidth || window.innerWidth);
+    const h = (viewport.clientHeight || window.innerHeight) - ($("#timelineBar")?.offsetHeight || 38);
     camera.aspect = w / Math.max(1, h);
     camera.updateProjectionMatrix();
     renderer.setSize(w, Math.max(1, h));
@@ -1896,26 +1892,29 @@
 
   // Register Service Worker
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    navigator.serviceWorker.register("sw.js", {updateViaCache:"none"}).catch(() => {});
   }
 
-  // Boot Studio: restore from localStorage Auto-Save if available, else Space Rover Demo
-  onResize();
-  applyLanguage();
-  try {
-    const savedRaw = localStorage.getItem("3dcad_autosave_v1");
-    const savedItems = savedRaw ? JSON.parse(savedRaw) : null;
-    if (Array.isArray(savedItems) && savedItems.length > 0) {
-      restoreSceneFromItems(savedItems);
-      zoomFitScene();
-    } else {
-      loadDemoProject("rover");
+  // Boot Studio: v2 complete documents, legacy migration and explicit recovery.
+  async function bootStudio() {
+    onResize(); applyLanguage();
+    try {
+      const saved = await projectStore.load();
+      if (saved) restoreSceneFromItems(saved.solids);
+      else loadDemoProject("rover");
+    } catch (error) {
+      savedScene = "load-error";
+      try {
+        const backup = await projectStore.load(true);
+        if (backup) { savedScene = ""; restoreSceneFromItems(backup.solids); showToast(L("Projeto recuperado da cópia anterior.", "Project recovered from the previous copy.")); }
+        else showToast(L("Falha ao abrir projeto. O arquivo anterior foi preservado; use Recuperar.", "Unable to open project. Previous data was preserved; use Recover."));
+      } catch { showToast(L("Falha na recuperação. Importe uma cópia JSON.", "Recovery failed. Import a JSON backup.")); }
     }
-  } catch {
-    loadDemoProject("rover");
+    zoomFitScene();
+    isBooting = false; undoStack = []; redoStack = [];
+    if (solids.length || savedScene !== "load-error") saveAutoSave();
+    $("#bootOverlay")?.remove();
+    animate();
   }
-  isBooting = false;
-  saveAutoSave();
-  undoStack = [];
-  animate();
+  bootStudio();
 })();

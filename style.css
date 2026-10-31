@@ -1157,3 +1157,105 @@ textarea {
     order: 3;
   }
 }
+
+/* 1.2: controls remain reachable at 360px and at large text sizes. */
+[hidden] { display: none !important; }
+button, input, select, textarea, summary { touch-action: manipulation; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent-cyan); outline-offset: 3px; }
+input, textarea { user-select: text; }
+.top-header { height: auto; min-height: 52px; flex-wrap: wrap; padding: 8px 12px; flex-shrink: 0; }
+.brand-group { flex: 1 1 240px; }
+.brand-title strong { flex-wrap: wrap; }
+.header-actions { flex-wrap: wrap; justify-content: flex-end; flex: 1 1 590px; min-width: 0; }
+.hdr-btn { height: auto; min-height: 34px; padding: 7px 9px; white-space: nowrap; }
+.lang-switch { flex-shrink: 0; order: -1; }
+.lang-switch button { min-height: 34px; min-width: 34px; }
+.workspace-tabs { display: flex; order: 3; flex: 1 1 100%; max-width: 100%; overflow-x: auto; }
+.ws-tab { flex-shrink: 0; min-height: 34px; }
+.ribbon-bar { flex-shrink: 0; max-width: 100%; scrollbar-width: thin; }
+.studio-body { grid-template-columns: 230px minmax(0,1fr) 320px; }
+.studio-body > *, .prop-card, .field-row { min-width: 0; }
+.center-viewport { min-width: 0; }
+#cad3dCanvas { min-height: 0; touch-action: none; }
+.viewport-hud-bar { width: max-content; max-width: calc(100% - 16px); overflow-x: auto; justify-content: flex-start; bottom: 72px; padding: 4px; scrollbar-width: thin; }
+.hud-btn { min-height: 32px; flex-shrink: 0; }
+.hud-sep { flex-shrink: 0; }
+.viewport-telemetry { max-width: calc(100% - 150px); }
+.telemetry-pill { flex-wrap: wrap; gap: 4px; max-width: 100%; overflow-wrap: anywhere; }
+.telemetry-pill b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.timeline-bar { height: auto; min-height: 62px; flex-shrink: 0; flex-wrap: wrap; gap: 3px; padding: 5px 8px; }
+.timeline-bar > div { flex-wrap: wrap; min-width: 0; }
+.timeline-bar [data-i18n="bedInfo"] { font-size: 10px; }
+.tl-btn { min-height: 30px; white-space: nowrap; }
+.tree-item { min-height: 38px; }
+.tree-actions { flex-shrink: 0; }
+.tree-act-btn { min-width: 30px; min-height: 30px; }
+.tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inspector-tabs { flex-shrink: 0; }
+.insp-tab { flex: 1; min-height: 40px; }
+.num-input, .txt-input, .sel-input { min-height: 34px; max-width: 100%; }
+.action-btn { min-height: 38px; }
+.btn-row, .btn-row-3 { flex-wrap: wrap; }
+.feature-note { font-size: 12px; line-height: 1.55; color: var(--text-muted); padding: 4px 0; overflow-wrap: anywhere; }
+.command-preview { max-width: 100%; overflow: auto; max-height: 220px; font: 11px/1.5 var(--font-mono); padding: 8px; background: var(--bg-input); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.prop-card summary { cursor: pointer; font-weight: 600; min-height: 34px; }
+.studio-footer { height: auto; min-height: 36px; flex-shrink: 0; flex-wrap: wrap; gap: 5px; padding: 8px 12px; }
+.footer-links { max-width: 100%; flex-wrap: wrap; overflow: visible; gap: 5px 12px; }
+.footer-links a { min-height: 25px; display: inline-flex; align-items: center; }
+.modal-card { max-height: calc(100dvh - 32px); overflow-y: auto; }
+.help-content { display: grid; gap: 10px; line-height: 1.65; color: var(--text-muted); user-select: text; }
+.help-content h3 { color: var(--text-main); margin-top: 5px; font-size: 14px; }
+.sketch-topbar { flex-wrap: wrap; padding: 6px; }
+.sketch-properties { flex-shrink: 0; padding: 6px; background: var(--bg-panel); max-height: 160px; overflow: auto; }
+#sketchEntityFields { display: flex; flex-direction: column; gap: 5px; }
+#sketchEntityFields fieldset { border: 1px solid var(--border-subtle); padding: 5px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+#sketchEntityFields input { width: 62px; }
+.sketch-canvas-wrap { min-height: 140px; }
+#sketch2dCanvas { touch-action: none; }
+.boot-overlay { position: fixed; inset: 0; display: grid; place-items: center; background: #0d1118; z-index: 300; color: var(--accent-cyan); }
+@media (max-width: 1280px) and (min-width: 781px) {
+  .studio-body { grid-template-columns: 190px minmax(0,1fr) 290px; }
+  .viewport-telemetry { max-width: calc(100% - 110px); left: 6px; }
+  .view-cube-widget { width: 92px; right: 6px; }
+}
+@media (max-width: 780px) {
+  html, body { overflow: auto; height: auto; }
+  .app-shell { height: auto; min-height: 100dvh; width: 100%; }
+  .top-header { padding: 7px 8px; gap: 6px; }
+  .brand-group { flex-basis: 100%; }
+  .header-actions { flex: 1 1 100%; justify-content: flex-start; gap: 4px; }
+  .hdr-btn { font-size: 11px; min-height: 36px; padding: 6px 7px; }
+  .workspace-tabs { border-radius: 4px; padding: 2px; }
+  .ws-tab { font-size: 11px; padding: 4px 8px; }
+  .ribbon-btn { min-width: 58px; }
+  .studio-body { display: flex; flex-direction: column; overflow: visible; }
+  .center-viewport { order: 1; height: 520px; flex: 0 0 520px; }
+  .left-browser { order: 2; max-height: none; overflow: visible; border-right: none; }
+  #featureTree { max-height: 260px; overflow: auto; }
+  .right-inspector { order: 3; max-height: none; overflow: visible; border-left: none; }
+  .insp-pane { overflow: visible; }
+  .view-cube-widget { width: 92px; right: 6px; top: 8px; padding: 4px; }
+  .viewport-telemetry { left: 6px; top: 8px; max-width: calc(100% - 112px); }
+  .telemetry-pill { font-size: 10px; padding: 4px 6px; }
+  .viewport-hud-bar { bottom: 92px; }
+  .timeline-bar { min-height: 82px; font-size: 10px; }
+  .timeline-bar .tl-controls { gap: 3px; }
+  .timeline-bar [data-i18n="bedInfo"] { display: block; }
+  .tree-act-btn { min-height: 40px; min-width: 40px; }
+  .tree-item { min-height: 44px; }
+  .modal-backdrop { padding: 8px; }
+  .modal-card { padding: 14px; max-height: calc(100dvh - 16px); }
+  .links-grid-14 { grid-template-columns: 1fr; }
+  .sketch-tools { gap: 4px; }
+  .sketch-topbar { max-height: 210px; overflow-y: auto; }
+  .sketch-properties { max-height: 140px; }
+  .studio-footer { padding: 10px 8px; }
+}
+
+/* Keep part names readable when the project tree is narrow. */
+.tree-item-left { display: grid; grid-template-columns: 10px minmax(0, 1fr); column-gap: 6px; row-gap: 2px; }
+.tree-item-left .color-dot { grid-row: 1 / 3; }
+.tree-item-left .tree-name { min-width: 0; }
+.tree-item-left .tree-type-tag { grid-column: 2; justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.tree-actions { flex-shrink: 0; }
+.ribbon-bar { height: 78px; overflow-y: hidden; }

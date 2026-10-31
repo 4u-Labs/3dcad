@@ -3,11 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>3DCad Studio — CAD 3D Paramétrico, Impressão 3D &amp; IA (MCP) | 4u-Labs</title>
+    <title>3DCad Studio — Modelagem 3D, Impressão &amp; Comandos Locais | 4u-Labs</title>
     <meta
       name="description"
-      content="Estúdio CAD 3D paramétrico open-source no navegador: Sketch 2D, Extrusão, Engrenagens, Suportes, CSG Booleano, Análise de Impressão 3D, Copiloto IA (MCP) e exportação STL, 3MF, STEP e OBJ."
+      content="Estúdio CAD 3D paramétrico open-source no navegador: Sketch 2D, Extrusão, Engrenagens, Suportes, CSG Booleano, Análise de Impressão 3D, Comandos Locais e exportação STL, 3MF, STEP e OBJ."
     />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
     <meta name="theme-color" content="#0d1118" />
     <link rel="canonical" href="https://4u.ia.br/app/3dcad/" />
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
@@ -15,28 +16,28 @@
     <link rel="apple-touch-icon" href="icon-192.png" />
     <link rel="manifest" href="manifest.json" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="3DCad Studio — CAD 3D Paramétrico, Impressão 3D &amp; IA (MCP)" />
+    <meta property="og:title" content="3DCad Studio — Modelagem 3D, Impressão &amp; Comandos Locais" />
     <meta
       property="og:description"
-      content="Modele peças técnicas para impressão 3D com parâmetros em milímetros, engrenagens, suportes, operações booleanas, estimador de filamento e Copiloto IA (MCP)."
+      content="Modele peças técnicas para impressão 3D com parâmetros em milímetros, engrenagens, suportes, operações booleanas, estimador de filamento e Comandos Locais."
     />
     <meta property="og:url" content="https://4u.ia.br/app/3dcad/" />
-    <meta property="og:image" content="https://4u.ia.br/app/3dcad/og-banner.jpg" />
+    <meta property="og:image" content="https://4u.ia.br/app/3dcad/og-banner.webp" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="3DCad Studio — CAD 3D Paramétrico &amp; Impressão 3D" />
+    <meta name="twitter:title" content="3DCad Studio — Modelagem 3D &amp; Impressão 3D" />
     <meta
       name="twitter:description"
-      content="Do FreeCAD ao SolidCraft no navegador: CAD 3D paramétrico com IA (MCP) e exportação STL, 3MF, STEP e OBJ por 4u-Labs."
+      content="Modelagem por malhas no navegador: CAD 3D paramétrico com comandos locais e exportação STL, 3MF, STEP e OBJ por 4u-Labs."
     />
-    <meta name="twitter:image" content="https://4u.ia.br/app/3dcad/og-banner.jpg" />
+    <meta name="twitter:image" content="https://4u.ia.br/app/3dcad/og-banner.webp" />
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "WebApplication",
         "name": "3DCad Studio",
         "url": "https://4u.ia.br/app/3dcad/",
-        "image": "https://4u.ia.br/app/3dcad/og-banner.jpg",
-        "description": "Estúdio CAD 3D paramétrico open-source no navegador com Sketch 2D, Extrusão, CSG, Geradores Mecânicos, Análise de Impressão 3D e Copiloto IA (MCP).",
+        "image": "https://4u.ia.br/app/3dcad/og-banner.webp",
+        "description": "Estúdio CAD 3D paramétrico open-source no navegador com Sketch 2D, Extrusão, CSG, Geradores Mecânicos, Análise de Impressão 3D e Comandos Locais.",
         "applicationCategory": "DesignApplication",
         "operatingSystem": "All",
         "isAccessibleForFree": true,
@@ -48,6 +49,7 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <div id="bootOverlay" class="boot-overlay" role="status">Abrindo projeto… / Opening project…</div>
     <div class="app-shell">
       <!-- TOP HEADER -->
       <header class="top-header">
@@ -56,9 +58,9 @@
           <div class="brand-title">
             <strong>
               <span>3DCad Studio</span>
-              <span class="badge-rust">Parametric + MCP</span>
+              <span class="badge-rust">Mesh CAD · Local</span>
             </strong>
-            <small data-i18n="subtitle">CAD 3D Paramétrico &amp; Impressão 3D · 4u-Labs</small>
+            <small data-i18n="subtitle">Modelagem 3D &amp; Impressão 3D · 4u-Labs</small>
           </div>
         </div>
 
@@ -76,7 +78,7 @@
             Impressão 3D
           </button>
           <button type="button" class="ws-tab" data-ws="ai" data-i18n="wsAi">
-            🤖 Copiloto IA (MCP)
+            🤖 Comandos Locais
           </button>
         </nav>
 
@@ -94,6 +96,9 @@
           <button type="button" class="hdr-btn primary" id="btnQuickExportStl">
             ⬇ <span data-i18n="exportStl">Exportar .STL</span>
           </button>
+          <button type="button" class="hdr-btn" id="btnSaveProject" data-i18n="saveProject">💾 Salvar JSON</button>
+          <button type="button" class="hdr-btn" id="btnHelp" data-i18n="help">? Ajuda</button>
+          <button type="button" class="hdr-btn" id="btnInstall" data-i18n="install">＋ Instalar</button>
           <div class="lang-switch" role="group" aria-label="Idioma / Language">
             <button type="button" id="langPt" class="active">PT</button>
             <button type="button" id="langEn">EN</button>
@@ -175,7 +180,7 @@
               <span class="ico">🪩</span>
               <span class="lbl" data-i18n="rbPillow">Mancal 608</span>
             </button>
-            <button type="button" class="tool-btn accent" data-add-type="SNAP_LID_BOX" title="Tampa com Rebordo de Encaixe Snap-Fit">
+            <button type="button" class="tool-btn accent" data-add-type="SNAP_LID_BOX" title="Tampa com rebordo e folga de encaixe">
               <span class="ico">🗃️</span>
               <span class="lbl" data-i18n="rbSnapLid">Tampa Snap</span>
             </button>
@@ -297,7 +302,7 @@
               <div class="demo-cards">
                 <button type="button" class="demo-btn" data-load-demo="rover">
                   <span>🚀 <b data-i18n="demoRover">Robô Rover (SolidCraft)</b></span>
-                  <small>13 pts</small>
+                  <small>14 pts</small>
                 </button>
                 <button type="button" class="demo-btn" data-load-demo="gearbox">
                   <span>⚙️ <b data-i18n="demoGearbox">Redutor de Engrenagens</b></span>
@@ -318,7 +323,7 @@
 
         <!-- CENTER VIEWPORT -->
         <section class="center-viewport" id="centerViewport">
-          <canvas id="cad3dCanvas"></canvas>
+          <canvas id="cad3dCanvas" tabindex="0" aria-label="Viewport 3D. Selecione peças na árvore para editar pelo teclado."></canvas>
 
           <!-- Top-Left Live Telemetry -->
           <div class="viewport-telemetry">
@@ -398,6 +403,7 @@
                 <button type="button" class="hdr-btn" data-sk-tool="hole">
                   🕳 <span data-i18n="skHole">Furo Circular</span>
                 </button>
+                <button type="button" class="hdr-btn" id="btnSketchAddNumeric" data-i18n="sketchAddNumeric">＋ Forma por cotas</button>
                 <button type="button" class="hdr-btn" id="btnSketchClear">
                   🗑 <span data-i18n="skClear">Limpar</span>
                 </button>
@@ -423,6 +429,7 @@
                 </button>
               </div>
             </div>
+            <details class="sketch-properties"><summary data-i18n="sketchDimensions">Cotas numéricas do esboço</summary><div id="sketchEntityFields"></div></details>
             <div class="sketch-canvas-wrap">
               <canvas id="sketch2dCanvas"></canvas>
             </div>
@@ -459,7 +466,7 @@
               🖨️ Impressão 3D
             </button>
             <button type="button" class="insp-tab" data-insp-tab="ai" data-i18n="tabAi">
-              🤖 IA &amp; MCP
+              ⌘ Comandos
             </button>
           </div>
 
@@ -520,6 +527,20 @@
               </button>
             </div>
 
+            <div class="btn-row">
+              <button type="button" class="action-btn" id="btnEditSketch" data-i18n="editSketch">Editar esboço</button>
+              <button type="button" class="action-btn" id="btnValidateMesh" data-i18n="validateMesh">Validar malha</button>
+            </div>
+            <p id="meshReport" class="feature-note" role="status"></p>
+            <details class="prop-card">
+              <summary data-i18n="patternSettings">Padrões, espelho e furo</summary>
+              <div class="field-row"><label for="patternCount" data-i18n="patternCount">Quantidade total</label><input id="patternCount" class="num-input" type="number" min="2" max="32" step="1" value="4"/></div>
+              <div class="field-row"><label for="patternStep" data-i18n="patternStep">Passo linear X (mm)</label><input id="patternStep" class="num-input" type="number" min="0.1" max="1000" step="0.1" value="45"/></div>
+              <div class="field-row"><label for="patternCenterX" data-i18n="patternCenterX">Centro circular X (mm)</label><input id="patternCenterX" class="num-input" type="number" step="0.1" value="0"/></div>
+              <div class="field-row"><label for="patternCenterY" data-i18n="patternCenterY">Centro circular Y (mm)</label><input id="patternCenterY" class="num-input" type="number" step="0.1" value="0"/></div>
+              <div class="field-row"><label for="mirrorPlaneX" data-i18n="mirrorPlaneX">Plano do espelho X (mm)</label><input id="mirrorPlaneX" class="num-input" type="number" step="0.1" value="0"/></div>
+              <div class="field-row"><label for="drillDiameter" data-i18n="drillDiameter">Diâmetro do furo (mm)</label><input id="drillDiameter" class="num-input" type="number" min="0.5" max="200" step="0.1" value="4.2"/></div>
+            </details>
             <!-- Color & Appearance -->
             <div class="prop-card">
               <div class="prop-card-title">
@@ -572,6 +593,8 @@
                 <span data-i18n="printMetricsTitle">Métricas Físicas de Impressão 3D</span>
                 <span id="bedFitBadge" class="tree-type-tag" style="color: #4ade80">✓ 220×220</span>
               </div>
+              <div class="field-row"><label for="printScope" data-i18n="printScope">Analisar</label><select id="printScope" class="sel-input"><option value="selected" data-i18n="scopeSelected">Peça selecionada</option><option value="scene" data-i18n="scopeScene">Cena inteira</option></select></div>
+              <p class="feature-note" data-i18n="printNote">Estimativas de material e tempo. Corte visual não gera camadas, suportes ou G-code. Valide no fatiador antes de imprimir.</p>
               <div class="metrics-grid">
                 <div class="metric-box highlight">
                   <small data-i18n="mWeight">Peso Estimado</small>
@@ -617,6 +640,7 @@
               <div class="field-row">
                 <label for="printInfill" data-i18n="lblInfill">Preenchimento (Infill %)</label>
                 <select id="printInfill" class="sel-input">
+                  <option value="0" data-i18n="infillZero">0% (Casca)</option>
                   <option value="15">15% (Leve / Protótipo)</option>
                   <option value="20" selected>20% (Padrão Funcional)</option>
                   <option value="40">40% (Reforçado / Mecânico)</option>
@@ -664,16 +688,16 @@
               </div>
               <div class="btn-row">
                 <button type="button" class="action-btn orange" id="printExportStlBin">
-                  ⬇ .STL (Binário)
+                  <span data-i18n="stlBinary">⬇ .STL binário</span>
                 </button>
                 <button type="button" class="action-btn orange" id="printExport3mf">
-                  ⬇ .3MF (Bambu/Prusa)
+                  ⬇ .3MF
                 </button>
                 <button type="button" class="action-btn" id="printExportStep">
-                  ⬇ .STEP (FreeCAD)
+                  <span data-i18n="stepFacet">⬇ .STEP facetado</span>
                 </button>
                 <button type="button" class="action-btn" id="printExportObj">
-                  ⬇ .OBJ (Malha)
+                  <span data-i18n="objMesh">⬇ .OBJ malha</span>
                 </button>
               </div>
             </div>
@@ -681,18 +705,22 @@
 
           <!-- TAB 3: AI COPILOT & MCP SERVER CONSOLE -->
           <div class="insp-pane" id="paneAi" hidden>
+            <p class="feature-note" data-i18n="commandNote">Comandos locais por regras, sem IA generativa ou servidor MCP. Confira a ação antes de aplicar.</p>
             <div class="prop-card">
               <div class="prop-card-title">
                 <span data-i18n="aiCopilotTitle">🤖 Copiloto Paramétrico (PT / EN)</span>
               </div>
               <textarea
+                aria-label="Comando local / Local command"
                 id="aiPromptInput"
                 class="ai-textarea"
                 placeholder="Ex.: Suporte em L 65x45mm largura 30mm espessura 5mm com furos M4..."
               ></textarea>
               <button type="button" class="action-btn orange" id="btnRunAiPrompt">
-                ⚡ <span data-i18n="btnGenerateAi">Gerar / Modificar Peça 3D</span>
+                ⚡ <span data-i18n="btnGenerateAi">Interpretar comando</span>
               </button>
+              <pre id="commandPreview" class="command-preview" aria-live="polite"></pre>
+              <button type="button" class="action-btn orange" id="btnApplyCommand" disabled data-i18n="applyCommand">Aplicar ação interpretada</button>
               <small style="color: var(--text-muted); font-size: 10.5px" data-i18n="aiExamplesLbl">
                 Clique em um exemplo para testar na hora:
               </small>
@@ -758,18 +786,21 @@
 
             <div class="prop-card">
               <div class="prop-card-title">
-                <span>🔌 Model Context Protocol (MCP JSON)</span>
-                <button type="button" class="tree-act-btn" id="btnCopyMcp">📋 Copiar</button>
+                <span data-i18n="jsonTitle">{ } Projeto JSON versionado</span>
+                <button type="button" class="tree-act-btn" id="btnCopyMcp" data-i18n="copyJson">📋 Copiar</button>
               </div>
+              <p class="feature-note" data-i18n="jsonNote">Projetos grandes mostram um resumo neste painel. Salvar JSON e Copiar preservam a malha completa; para abrir, importe o arquivo ou cole o projeto completo.</p>
               <textarea
+                aria-label="Projeto JSON / JSON project"
                 id="mcpJsonConsole"
                 class="ai-textarea code-textarea"
                 spellcheck="false"
               ></textarea>
               <div class="btn-row">
                 <button type="button" class="action-btn" id="btnApplyMcpJson">
-                  ▶ <span data-i18n="btnApplyMcp">Aplicar JSON MCP</span>
+                  ▶ <span data-i18n="btnApplyMcp">Abrir JSON</span>
                 </button>
+                <button type="button" class="action-btn" id="btnRecoverProject" data-i18n="recoverProject">Recuperar cópia anterior</button>
                 <button type="button" class="action-btn" id="btnRefreshMcpJson">
                   ↻ <span data-i18n="btnSyncMcp">Sincronizar</span>
                 </button>
@@ -782,7 +813,7 @@
       <!-- FOOTER WITH 14 OFFICIAL 4U-LABS LINKS -->
       <footer class="studio-footer">
         <div>
-          <strong>3DCad Studio 1.0</strong> · 4u-Labs Open-Source Ecosystem
+          <strong>3DCad Studio 1.2</strong> · 4u-Labs · <span id="copyrightYear"></span>
         </div>
         <nav class="footer-links" aria-label="4u-Labs Ecosystem">
           <a href="https://4u.ia.br/" target="_blank" rel="noopener noreferrer">Portal 4U</a>
@@ -845,6 +876,21 @@
       </div>
     </div>
 
+    <div class="modal-backdrop" id="helpModal" hidden>
+      <div class="modal-card help-card" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+        <div class="modal-head"><h2 id="helpTitle" data-i18n="helpTitle">Primeiros passos e limites</h2><button type="button" class="hdr-btn" id="btnCloseHelp" data-i18n="closeHelp">Fechar</button></div>
+        <div class="help-content">
+          <h3 data-i18n="helpSaveTitle">1. Salve e recupere seu trabalho</h3><p data-i18n="helpSave">O projeto completo fica neste navegador, incluindo STL e operações booleanas. Aguarde “Salvo neste navegador”. Use Salvar JSON para uma cópia externa; limpar dados do navegador remove o salvamento local. Recuperar abre a cópia anterior e pode ser desfeito.</p>
+          <h3 data-i18n="helpModelTitle">2. Modele com medidas</h3><p data-i18n="helpModel">Crie uma peça e edite os parâmetros em milímetros. Desfazer/refazer inclui dimensões e transformações. No esboço, use as cotas numéricas ou desenhe formas. Editar esboço altera a extrusão selecionada. Furos devem ficar totalmente dentro de um contorno.</p>
+          <h3 data-i18n="helpExportTitle">3. Exporte e confira</h3><p data-i18n="helpExport">STL, OBJ e 3MF usam milímetros e Z vertical, preservando a posição das peças visíveis. 3MF mantém peças e cores. STEP facetado contém faces triangulares, sem superfícies analíticas ou histórico paramétrico. 3MF e STEP recusam malhas abertas ou inválidas. Valide a malha e abra o arquivo em uma ferramenta independente.</p>
+          <h3 data-i18n="helpCommandsTitle">4. Comandos locais</h3><p data-i18n="helpCommands">Use os exemplos em PT/EN, interprete e confira a ação antes de aplicar. O interpretador funciona por regras, sem IA generativa nem conexão MCP. Comandos de edição exigem uma peça paramétrica selecionada.</p>
+          <h3 data-i18n="helpLimitsTitle">5. Limites do modelador</h3><p data-i18n="helpLimits">Modelagem por malhas, sem núcleo BRep, solver de restrições ou juntas de montagem. CSG produz uma malha editável por transformação; seus parâmetros originais não são dependências recomputáveis. A visualização de peças não é histórico de operações. Parafusos não têm rosca helicoidal; polias não têm dentes GT2; a tampa usa rebordo com folga, sem trava snap-fit. Teste encaixes e tolerâncias antes da fabricação.</p>
+          <h3 data-i18n="helpPrintTitle">6. Impressão 3D</h3><p data-i18n="helpPrint">Peso e tempo são estimativas. A validação de mesa considera a cena visível em 220 × 220 × 250 mm. O corte é uma inspeção visual; fatiamento, suportes e G-code devem ser feitos no fatiador. Na resina, a medida de filamento não se aplica.</p>
+          <h3 data-i18n="helpInstallTitle">7. Instalar e usar offline</h3><p data-i18n="helpInstall">Use Instalar quando o navegador oferecer. No iPhone/iPad: Safari → Compartilhar → Adicionar à Tela de Início. No Android/Desktop: menu do navegador → Instalar app. Abra o app online uma vez e aguarde o cache; depois teste sem conexão. A instalação é opcional.</p>
+          <h3 data-i18n="helpKeysTitle">8. Teclado e navegação</h3><p data-i18n="helpKeys">Tab percorre os controles; Enter seleciona a peça na árvore. Ctrl+Z desfaz, Ctrl+Y refaz, F enquadra e Delete exclui a seleção fora dos campos de edição. Escape fecha ajuda e esboço. Use os campos X/Y/Z para mover com precisão.</p>
+        </div>
+      </div>
+    </div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <!-- SCRIPTS -->
@@ -853,7 +899,10 @@
     <script src="libs/STLExporter.js"></script>
     <script src="libs/STLLoader.js"></script>
     <script src="libs/three-csg.js"></script>
+    <script src="cad_mesh.js"></script>
     <script src="cad_generators.js"></script>
+    <script src="cad_project.js"></script>
+    <script src="ui_text.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

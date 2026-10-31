@@ -66,7 +66,7 @@
     ],
     HEX_BOLT: [
       { key: "metricDia", pt: "Bitola Métrica M (mm)", en: "Metric Thread M (mm)", min: 3, max: 20, step: 1 },
-      { key: "shaftLength", pt: "Comprimento da Rosca (mm)", en: "Thread Length (mm)", min: 0, max: 150, step: 1 },
+      { key: "shaftLength", pt: "Comprimento da Haste (mm)", en: "Shaft Length (mm)", min: 0, max: 150, step: 1 },
       { key: "headWidth", pt: "Chave Sextavada (mm)", en: "Hex Flats Width (mm)", min: 5, max: 36, step: 0.5 },
       { key: "headHeight", pt: "Altura da Cabeça (mm)", en: "Head Height (mm)", min: 2, max: 20, step: 0.5 },
       { key: "nutBore", pt: "Furo Interno (Porca=1, Parafuso=0)", en: "Is Nut (1=Nut, 0=Bolt)", min: 0, max: 1, step: 1 },
@@ -89,7 +89,7 @@
       { key: "width", pt: "Largura Externa X (mm)", en: "Outer Width X (mm)", min: 20, max: 400, step: 1 },
       { key: "depth", pt: "Profundidade Y (mm)", en: "Outer Depth Y (mm)", min: 20, max: 400, step: 1 },
       { key: "topThickness", pt: "Espessura da Tampa Z (mm)", en: "Lid Plate Thickness Z (mm)", min: 1.5, max: 20, step: 0.5 },
-      { key: "lipHeight", pt: "Altura do Rebordo Snap (mm)", en: "Snap Lip Height (mm)", min: 1.5, max: 25, step: 0.5 },
+      { key: "lipHeight", pt: "Altura do Rebordo (mm)", en: "Lip Height (mm)", min: 1.5, max: 25, step: 0.5 },
       { key: "wallThickness", pt: "Parede da Caixa (mm)", en: "Box Wall Thickness (mm)", min: 1.2, max: 15, step: 0.2 },
       { key: "clearance", pt: "Folga Impressão 3D (mm)", en: "3D Print Clearance (mm)", min: 0, max: 1.5, step: 0.05 },
       { key: "ventSlots", pt: "Aletas de Ventilação (0/1)", en: "Ventilation Slots (0/1)", min: 0, max: 1, step: 1 },
@@ -170,6 +170,7 @@
    * Builds a THREE.BufferGeometry from parametric feature type & params
    */
   function buildParametricGeometry(type, params = {}) {
+    if (root.CadProject) params = root.CadProject.validateParams(type, params);
     switch (type) {
       case "BOX": {
         const w = Math.max(1, Number(params.width) || 40);
@@ -227,7 +228,7 @@
         const mod = Math.max(0.5, Number(params.module) || 2);
         const Z = Math.max(6, Math.min(120, Math.round(Number(params.teeth) || 24)));
         const h = Math.max(1, Number(params.thickness) || 8);
-        const bore = Math.max(0, Number(params.boreDiameter) || 6);
+        const bore = Math.max(0, num(params.boreDiameter, 6));
         const pa = ((Number(params.pressureAngle) || 20) * Math.PI) / 180;
 
         const pitchR = (mod * Z) / 2;
@@ -656,7 +657,8 @@
 
       case "SKETCH_EXTRUDE": {
         const h = Math.max(1, Number(params.height) || 15);
-        const bevel = Math.max(0, Number(params.bevel) || 0);
+        const requestedBevel = Math.min(Math.max(0, Number(params.bevel) || 0), h * 0.24);
+        const bevel = requestedBevel > 0.05 ? requestedBevel : 0;
         const entities = Array.isArray(params.entities) ? params.entities : [];
         if (entities.length === 0) {
           return new THREE.BoxGeometry(30, h, 30);
@@ -711,21 +713,29 @@
           return sh;
         };
 
-        const shapes = solids.map((ent) => {
-          const sh = buildShapeFromEnt(ent);
-          for (const hole of holes) {
-            if (hole.kind === "circle") {
-              sh.holes.push(makeCirclePath(hole.x || 0, -(hole.y || 0), Math.max(0.5, hole.r || 3), 32));
-            }
+        const shapes = solids.map(buildShapeFromEnt);
+        function inside(point, polygon) {
+          let result=false;
+          for(let i=0,j=polygon.length-1;i<polygon.length;j=i++) {
+            const a=polygon[i],b=polygon[j];
+            if((a.y>point.y)!==(b.y>point.y)&&point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x) result=!result;
           }
-          return sh;
-        });
+          return result;
+        }
+        for(const hole of holes) {
+          const samples=Array.from({length:32},(_,i)=>({x:hole.x+Math.cos(i*Math.PI/16)*hole.r,y:-hole.y+Math.sin(i*Math.PI/16)*hole.r}));
+          const matches=shapes.filter(shape=>samples.every(point=>inside(point,shape.getPoints(64))));
+          if(matches.length!==1) throw new Error('Furo deve estar dentro de um único contorno / Hole must be inside exactly one profile');
+          matches[0].holes.push(makeCirclePath(hole.x,-hole.y,hole.r,32));
+        }
+        for(let i=0;i<holes.length;i++)for(let j=i+1;j<holes.length;j++)if(Math.hypot(holes[i].x-holes[j].x,holes[i].y-holes[j].y)<=holes[i].r+holes[j].r)
+          throw new Error('Furos sobrepostos ou tangentes / Overlapping or tangent holes');
 
         const geom = new THREE.ExtrudeGeometry(shapes, {
-          depth: h,
+          depth: h - 2 * bevel,
           bevelEnabled: bevel > 0.05,
           bevelThickness: bevel,
-          bevelSize: bevel,
+          bevelSize: -bevel,
           bevelSegments: 2,
           curveSegments: 32,
         });
@@ -739,7 +749,7 @@
       }
 
       default:
-        return new THREE.BoxGeometry(20, 20, 20);
+        throw new Error("Tipo de peça desconhecido / Unknown part type: " + type);
     }
   }
 
@@ -754,6 +764,7 @@
     RESIN: { density: 1.15, name: "Resina SLA/DLP (1.15 g/cm³)", speedMm3s: 14 },
   };
 
+  const PRINT_METRIC_CACHE = new WeakMap();
   function analyzeMeshFor3DPrint(meshes, printSettings = {}) {
     const list = Array.isArray(meshes) ? meshes : meshes ? [meshes] : [];
     let totalVolMm3 = 0;
@@ -781,26 +792,25 @@
       const index = geom.index;
       const triCount = index ? index.count / 3 : pos.count / 3;
       totalTriangles += triCount;
-
-      let signedVol = 0;
-      for (let i = 0; i < triCount; i++) {
-        const i0 = index ? index.getX(i * 3) : i * 3;
-        const i1 = index ? index.getX(i * 3 + 1) : i * 3 + 1;
-        const i2 = index ? index.getX(i * 3 + 2) : i * 3 + 2;
-
-        pA.fromBufferAttribute(pos, i0).applyMatrix4(mat4);
-        pB.fromBufferAttribute(pos, i1).applyMatrix4(mat4);
-        pC.fromBufferAttribute(pos, i2).applyMatrix4(mat4);
-
-        // Signed volume of tetrahedron (0, pA, pB, pC)
-        signedVol += pA.dot(cb.crossVectors(pB, pC)) / 6.0;
-
-        // Triangle surface area = 0.5 * |(pB - pA) x (pC - pA)|
-        ab.subVectors(pB, pA);
-        cb.subVectors(pC, pA);
-        totalAreaMm2 += cb.cross(ab).length() * 0.5;
+      // Translation leaves physical metrics unchanged. Cache the linear part
+      // of the world transform to keep dragging independent of triangle count.
+      const linear = new THREE.Matrix3().setFromMatrix4(mat4);
+      const signature = linear.elements.map(n => n.toPrecision(12)).join(',') + ':' + pos.version;
+      let cached = PRINT_METRIC_CACHE.get(geom);
+      if (!cached || cached.signature !== signature) {
+        let signedVol = 0, area = 0;
+        for (let i = 0; i < triCount; i++) {
+          const i0=index?index.getX(i*3):i*3, i1=index?index.getX(i*3+1):i*3+1, i2=index?index.getX(i*3+2):i*3+2;
+          pA.fromBufferAttribute(pos,i0).applyMatrix3(linear);
+          pB.fromBufferAttribute(pos,i1).applyMatrix3(linear);
+          pC.fromBufferAttribute(pos,i2).applyMatrix3(linear);
+          signedVol += pA.dot(cb.crossVectors(pB,pC))/6;
+          ab.subVectors(pB,pA);cb.subVectors(pC,pA);area += cb.cross(ab).length()*0.5;
+        }
+        cached={signature,volume:Math.abs(signedVol),area};PRINT_METRIC_CACHE.set(geom,cached);
       }
-      totalVolMm3 += Math.abs(signedVol);
+      totalVolMm3 += cached.volume;totalAreaMm2 += cached.area;
+
     }
 
     const sizeVec = new THREE.Vector3();
@@ -811,7 +821,7 @@
 
     const matKey = printSettings.material || "PLA";
     const matInfo = FILAMENT_MATERIALS[matKey] || FILAMENT_MATERIALS.PLA;
-    const infillFrac = Math.min(1, Math.max(0.05, Number(printSettings.infill ?? 20) / 100));
+    const infillFrac = Math.min(1, Math.max(0, Number(printSettings.infill ?? 20) / 100));
     const layerH = Math.max(0.08, Number(printSettings.layerHeight) || 0.2);
     const spoolPrice = Math.max(10, Number(printSettings.spoolPrice) || 110);
     const wallThicknessMm = 1.2; // 3 perimeters * 0.4mm nozzle
@@ -827,17 +837,18 @@
 
     const weightGrams = extrudedVolCm3 * matInfo.density;
     // 1.75mm filament cross-sectional area = pi * (1.75/2)^2 = 2.40528 mm^2
-    const filamentMeters = extrudedVolMm3 / 2.40528 / 1000;
+    const filamentMeters = matKey === "RESIN" ? 0 : extrudedVolMm3 / 2.40528 / 1000;
     const costBrl = (weightGrams / 1000) * spoolPrice;
 
     // Print time estimation based on volumetric flow rate + layer height factor
     const layerFactor = 0.2 / layerH;
-    const estSeconds = Math.max(
+    const estSeconds = totalVolMm3 === 0 ? 0 : Math.max(
       60,
       (extrudedVolMm3 / matInfo.speedMm3s) * layerFactor * 1.28 + sizeVec.y * 8
     );
-    const hours = Math.floor(estSeconds / 3600);
-    const minutes = Math.ceil((estSeconds % 3600) / 60);
+    const totalMinutes = Math.ceil(estSeconds / 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
 
     return {
       triangles: Math.round(totalTriangles),
@@ -854,7 +865,9 @@
       filamentMeters: Number(filamentMeters.toFixed(2)),
       costBrl: Number(costBrl.toFixed(2)),
       timeFormatted: hours > 0 ? `${hours}h ${minutes}min` : `${minutes} min`,
-      fitsBed220: sizeVec.x <= 220 && sizeVec.z <= 220 && sizeVec.y <= 250,
+      fitsBed220: !overallBox.isEmpty() && overallBox.min.x >= -110 - 1e-4 && overallBox.max.x <= 110 + 1e-4 && overallBox.min.z >= -110 - 1e-4 && overallBox.max.z <= 110 + 1e-4 && overallBox.min.y >= -1e-4 && overallBox.max.y <= 250 + 1e-4,
+      isEstimate: true,
+      material: matKey,
     };
   }
 
@@ -935,339 +948,92 @@
   /**
    * Collect world-space Z-up triangles from visible meshes (converting Three.js Y-up -> CAD Z-up for slicers!)
    */
-  function collectWorldMeshData(meshes) {
-    const vertices = [];
-    const triangles = [];
-    const vA = new THREE.Vector3();
-
-    for (const mesh of meshes) {
-      if (!mesh || !mesh.geometry || mesh.visible === false) continue;
-      mesh.updateWorldMatrix(true, false);
-      const mat4 = mesh.matrixWorld;
-      const geom = mesh.geometry;
-      const pos = geom.attributes.position;
-      if (!pos) continue;
-
-      const baseIndex = vertices.length;
-      for (let i = 0; i < pos.count; i++) {
-        vA.fromBufferAttribute(pos, i).applyMatrix4(mat4);
-        // Map Three.js (x, y_up, z_depth) -> CAD Slicer Z-up (x, -z_depth, y_up)
-        vertices.push([
-          Number(vA.x.toFixed(4)),
-          Number((-vA.z).toFixed(4)),
-          Number(vA.y.toFixed(4)),
-        ]);
-      }
-
-      const idx = geom.index;
-      if (idx) {
-        for (let i = 0; i < idx.count; i += 3) {
-          triangles.push([
-            baseIndex + idx.getX(i),
-            baseIndex + idx.getX(i + 1),
-            baseIndex + idx.getX(i + 2),
-          ]);
-        }
-      } else {
-        for (let i = 0; i < pos.count; i += 3) {
-          triangles.push([baseIndex + i, baseIndex + i + 1, baseIndex + i + 2]);
-        }
-      }
-    }
-    return { vertices, triangles };
-  }
-
+  const xml = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
   function exportMeshesTo3MF(meshes) {
-    const { vertices, triangles } = collectWorldMeshData(meshes);
-    const vXml = vertices
-      .map(([x, y, z]) => `          <vertex x="${x}" y="${y}" z="${z}" />`)
-      .join("\n");
-    const tXml = triangles
-      .map(([v1, v2, v3]) => `          <triangle v1="${v1}" v2="${v2}" v3="${v3}" />`)
-      .join("\n");
-
-    const modelXml = `<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
-  <metadata name="Application">3DCad Studio by 4u-Labs</metadata>
-  <resources>
-    <object id="1" type="model" name="3DCad_Part">
-      <mesh>
-        <vertices>
-${vXml}
-        </vertices>
-        <triangles>
-${tXml}
-        </triangles>
-      </mesh>
-    </object>
-  </resources>
-  <build>
-    <item objectid="1" />
-  </build>
-</model>`;
-
-    const contentTypesXml = `<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />
-  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" />
-</Types>`;
-
-    const relsXml = `<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />
-</Relationships>`;
-
-    return buildZipBlob([
-      { name: "[Content_Types].xml", data: contentTypesXml },
-      { name: "_rels/.rels", data: relsXml },
-      { name: "3D/3dmodel.model", data: modelXml },
-    ]);
+    const objects = root.CadMesh.collect(meshes, true);
+    const colors = objects.map(o => `<base name="${xml(o.name)}" displaycolor="${o.color.toUpperCase()}FF"/>`).join('');
+    const resources = objects.map((o, i) => `<object id="${i + 2}" type="model" name="${xml(o.name)}" pid="1" pindex="${i}"><mesh><vertices>${o.vertices.map(v => `<vertex x="${v[0]}" y="${v[1]}" z="${v[2]}"/>`).join('')}</vertices><triangles>${o.triangles.map(f => `<triangle v1="${f[0]}" v2="${f[1]}" v3="${f[2]}"/>`).join('')}</triangles></mesh></object>`).join('');
+    const modelXml = `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Application">3DCad Studio 1.2</metadata><resources><basematerials id="1">${colors}</basematerials>${resources}</resources><build>${objects.map((o,i)=>`<item objectid="${i+2}"/>`).join('')}</build></model>`;
+    const contentTypesXml = `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>`;
+    const relsXml = `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`;
+    return buildZipBlob([{name:'[Content_Types].xml',data:contentTypesXml},{name:'_rels/.rels',data:relsXml},{name:'3D/3dmodel.model',data:modelXml}]);
   }
-
-  function exportMeshesToOBJ(meshes) {
-    const { vertices, triangles } = collectWorldMeshData(meshes);
-    const lines = [
-      "# 3DCad Studio by 4u-Labs — Exported OBJ (units: mm)",
-      "o 3DCad_Model",
-    ];
-    for (const [x, y, z] of vertices) {
-      lines.push(`v ${x} ${y} ${z}`);
-    }
-    for (const [v1, v2, v3] of triangles) {
-      lines.push(`f ${v1 + 1} ${v2 + 1} ${v3 + 1}`);
-    }
-    return new Blob([lines.join("\n") + "\n"], { type: "text/plain;charset=utf-8" });
-  }
-
-  function exportMeshesToSTEP(meshes) {
-    const { vertices, triangles } = collectWorldMeshData(meshes);
-    const nowIso = new Date().toISOString().slice(0, 19);
-    const lines = [
-      "ISO-10303-21;",
-      "HEADER;",
-      "FILE_DESCRIPTION(('3DCad Studio Parametric Export - 4u-Labs'),'2;1');",
-      `FILE_NAME('model_3dcad.step','${nowIso}',('3DCad Studio'),('4u-Labs'),'3DCad 1.0','3DCad','');`,
-      "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));",
-      "ENDSEC;",
-      "DATA;",
-      "#1 = APPLICATION_CONTEXT('core data for automotive mechanical design processes');",
-      "#2 = APPLICATION_PROTOCOL_DEFINITION('international standard','automotive_design',2000,#1);",
-      "#3 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );",
-    ];
-    let id = 10;
-    const ptIds = [];
-    for (const [x, y, z] of vertices) {
-      lines.push(`#${id} = CARTESIAN_POINT('',(${x},${y},${z}));`);
-      ptIds.push(id++);
-    }
-    const maxTris = Math.min(triangles.length, 4000);
-    for (let i = 0; i < maxTris; i++) {
-      const [a, b, c] = triangles[i];
-      lines.push(`#${id++} = POLY_LOOP('',(#${ptIds[a]},#${ptIds[b]},#${ptIds[c]}));`);
-    }
-    lines.push("ENDSEC;", "END-ISO-10303-21;");
-    return new Blob([lines.join("\n") + "\n"], { type: "application/step;charset=utf-8" });
-  }
+  function exportMeshesToOBJ(meshes) { return root.CadMesh.obj(meshes); }
+  function exportMeshesToSTEP(meshes) { return root.CadMesh.step(meshes); }
 
   /**
    * Natural Language Prompt Parser (PT-BR & EN) -> Parametric Feature Action
    */
   function parseCadPrompt(rawText) {
-    const text = String(rawText || "").trim();
-    if (!text) return null;
-    const norm = text
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase();
-
-    const nums = (norm.match(/\d+(?:[.,]\d+)?/g) || []).map((n) =>
-      Number(n.replace(",", "."))
-    );
-    const mMatch = norm.match(/\bm(\d+(?:[.,]\d+)?)\b/);
-    const mSize = mMatch ? Number(mMatch[1].replace(",", ".")) : null;
-
-    // 1. Hole / Cut action on selected solid
-    if (/\b(furar|furo|perfurar|drill|cut hole|bore)\b/.test(norm) && !/\b(suporte|cantoneira|placa|engrenagem|caixa)\b/.test(norm)) {
-      const dia = mSize ? mSize + 0.2 : nums[0] || 5;
-      return {
-        action: "DRILL_HOLE",
-        diameter: dia,
-        summaryPt: `Furo passante Ø${dia}mm aplicado na peça`,
-        summaryEn: `Drilled Ø${dia}mm through-hole`,
-      };
+    const text = String(rawText || '').trim();
+    if (!text || text.length > 1000) return null;
+    const norm = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const number = '(-?\\d+(?:[.,]\\d+)?)';
+    const parse = value => value === undefined ? undefined : Number(value.replace(',', '.'));
+    const named = terms => { const match = norm.match(new RegExp('(?:'+terms+')\\s*(?:de|of|to|para|=|:)?\\s*'+number)); return match ? parse(match[1]) : undefined; };
+    const dimensions = norm.match(new RegExp(number+'\\s*[x×]\\s*'+number+'(?:\\s*[x×]\\s*'+number+')?'));
+    const dims = dimensions ? dimensions.slice(1).map(parse) : [];
+    const metric = norm.match(/\bm(\d+(?:[.,]\d+)?)\b/);
+    const m = metric ? parse(metric[1]) : undefined;
+    const width = named('largura|width'), depth = named('profundidade|depth'), height = named('altura|height'), thickness = named('espessura|thickness');
+    const bore = named('furo|bore|eixo|shaft bore|inner diameter'), diameter = named('diametro(?: externo)?|outer diameter|diameter');
+    if (/\b(cm|inch|inches|polegadas|metros)\b/.test(norm)) return null;
+    const modify = /\b(alterar|modificar|ajustar|mudar|change|modify|update|set)\b/.test(norm);
+    if (modify) {
+      const target = terms => { const match = norm.match(new RegExp('(?:'+terms+')[^0-9]{0,70}?(?:para|to|=)\\s*'+number)); return match ? parse(match[1]) : undefined; };
+      const params = {};
+      for (const [key, value] of Object.entries({width:width??target('largura|width'),depth:depth??target('profundidade|depth'),height:height??target('altura|height'),thickness,diameter,boreDiameter:bore})) if (value !== undefined) params[key] = value;
+      return Object.keys(params).length ? {action:'MODIFY',params,name:'Editar peça / Edit part'} : null;
     }
-
-    // 2. Spur Gear (Engrenagem)
-    if (/\b(engrenagem|gear|pinhao|roda dentada)\b/.test(norm)) {
-      const teethMatch = norm.match(/(\d+)\s*(?:dentes|teeth|z\b)/);
-      const modMatch = norm.match(/(?:modulo|module)\s*(\d+(?:[.,]\d+)?)/);
-      const thickMatch = norm.match(/(?:espessura|altura|thickness)\s*(\d+(?:[.,]\d+)?)/);
-      const boreMatch = norm.match(/(?:furo|eixo|bore)\s*(\d+(?:[.,]\d+)?)/);
-      const teeth = teethMatch ? Number(teethMatch[1]) : nums[0] || 24;
-      const mod = modMatch ? Number(modMatch[1].replace(",", ".")) : nums[1] && nums[1] <= 10 ? nums[1] : 2;
-      const thickness = thickMatch ? Number(thickMatch[1].replace(",", ".")) : nums[2] || 8;
-      const bore = boreMatch ? Number(boreMatch[1].replace(",", ".")) : mSize || 6;
-      return {
-        action: "CREATE",
-        type: "SPUR_GEAR",
-        name: `Engrenagem_Z${teeth}_M${mod}`,
-        color: "#f97316",
-        params: { module: mod, teeth, thickness, boreDiameter: bore, pressureAngle: 20 },
-      };
+    const isGear = /\b(engrenagem|gear|pinhao)\b/.test(norm);
+    const isBracket = /\b(suporte|cantoneira|bracket)\b/.test(norm);
+    const isPlate = /\b(placa|chapa|flange|plate|base)\b/.test(norm);
+    const isBox = /\b(bloco|cubo|box|block|cube)\b/.test(norm);
+    const isCase = /\b(caixa|gabinete|case|enclosure)\b/.test(norm);
+    const isBearing = /\b(mancal|rolamento|bearing|pillow)\b/.test(norm);
+    const isLid = /\b(tampa|snap|lid|cover)\b/.test(norm);
+    const isBolt = /\b(parafuso|porca|bolt|nut|screw)\b/.test(norm);
+    const isPulley = /\b(polia|roldana|pulley)\b/.test(norm);
+    const isCylinder = /\b(cilindro|tubo|bucha|cylinder|tube|pipe|bushing)\b/.test(norm);
+    const isSphere = /\b(esfera|sphere)\b/.test(norm);
+    const isCone = /\b(cone)\b/.test(norm);
+    const isTorus = /\b(torus|o-ring|anel|ring)\b/.test(norm);
+    const partMentioned = isGear || isBracket || isPlate || isBox || isCase || isBearing || isLid || isBolt || isPulley || isCylinder || isSphere || isCone || isTorus;
+    if (!partMentioned && /\b(furar|perfurar|drill|furo|bore)\b/.test(norm)) {
+      const d = bore ?? diameter ?? (m !== undefined ? m + 0.2 : named('furar|perfurar|drill'));
+      return d === undefined ? null : {action:'DRILL_HOLE',diameter:d,name:`Furo / Hole Ø${d} mm`};
     }
-
-    // 3. L-Bracket (Suporte em L / Cantoneira)
-    if (/\b(suporte|cantoneira|bracket|l-bracket)\b/.test(norm)) {
-      const armA = nums[0] || 60;
-      const armB = nums[1] || 45;
-      const width = nums[2] || 30;
-      const thickness = nums[3] && nums[3] <= 20 ? nums[3] : 5;
-      const holeDiameter = mSize ? mSize + 0.2 : 4.2;
-      return {
-        action: "CREATE",
-        type: "L_BRACKET",
-        name: `Suporte_L_${armA}x${armB}`,
-        color: "#38bdf8",
-        params: { armA, armB, width, thickness, holeDiameter, gusset: 1 },
-      };
-    }
-
-    // 4. Electronics Enclosure (Caixa / Gabinete)
-    if (/\b(caixa|gabinete|case|enclosure)\b/.test(norm)) {
-      const width = nums[0] || 85;
-      const depth = nums[1] || 58;
-      const height = nums[2] || 32;
-      const wallThickness = nums[3] && nums[3] <= 10 ? nums[3] : 2.5;
-      return {
-        action: "CREATE",
-        type: "ENCLOSURE",
-        name: `Gabinete_${width}x${depth}x${height}`,
-        color: "#3b82f6",
-        params: { width, depth, height, wallThickness, standoffHeight: 6, screwHole: 2.8 },
-      };
-    }
-
-    // 5. Pillow Block / Bearing 608 (Mancal / Rolamento)
-    if (/\b(mancal|rolamento|608|bearing|pillow)\b/.test(norm)) {
-      const bearingBore = /\b608\b/.test(norm) ? 22.2 : nums[0] || 22.2;
-      const outerRingDia = Math.max(bearingBore + 10, Math.round(bearingBore * 1.55));
-      const baseWidth = Math.max(outerRingDia + 28, nums[1] || 68);
-      return {
-        action: "CREATE",
-        type: "PILLOW_BLOCK",
-        name: `Mancal_608_D${bearingBore}`,
-        color: "#10b981",
-        params: {
-          bearingBore,
-          outerRingDia,
-          baseWidth,
-          thickness: 14,
-          baseHeight: 6,
-          mountHoleDia: 4.4,
-        },
-      };
-    }
-
-    // 6. Snap-Fit Lid / Cover (Tampa Snap-Fit)
-    if (/\b(tampa|snap|lid|cover)\b/.test(norm)) {
-      const width = nums[0] || 85;
-      const depth = nums[1] || 58;
-      return {
-        action: "CREATE",
-        type: "SNAP_LID_BOX",
-        name: `Tampa_SnapFit_${width}x${depth}`,
-        color: "#8b5cf6",
-        params: {
-          width,
-          depth,
-          topThickness: 3,
-          lipHeight: 4,
-          wallThickness: 2.5,
-          clearance: 0.3,
-          ventSlots: 1,
-        },
-      };
-    }
-
-    // 7. Mounting Plate (Placa / Base / Chapa)
-    if (/\b(placa|chapa|flange|plate|base)\b/.test(norm)) {
-      const width = nums[0] || 90;
-      const depth = nums[1] || 70;
-      const thickness = nums[2] && nums[2] <= 30 ? nums[2] : 5;
-      const holeDiameter = mSize ? mSize + 0.2 : nums[3] || 4.2;
-      return {
-        action: "CREATE",
-        type: "MOUNTING_PLATE",
-        name: `Placa_Base_${width}x${depth}`,
-        color: "#10b981",
-        params: { width, depth, thickness, cornerRadius: 6, holeDiameter, centerBore: 0 },
-      };
-    }
-
-    // 8. Bolt / Nut (Parafuso / Porca)
-    if (/\b(parafuso|porca|bolt|nut|screw)\b/.test(norm)) {
-      const isNut = /\b(porca|nut)\b/.test(norm) ? 1 : 0;
-      const metricDia = mSize || nums[0] || 6;
-      const shaftLength = isNut ? 0 : nums[1] || 22;
-      return {
-        action: "CREATE",
-        type: "HEX_BOLT",
-        name: isNut ? `Porca_M${metricDia}` : `Parafuso_M${metricDia}x${shaftLength}`,
-        color: "#94a3b8",
-        params: {
-          metricDia,
-          shaftLength,
-          headWidth: Number((metricDia * 1.65).toFixed(1)),
-          headHeight: Number((metricDia * 0.7).toFixed(1)),
-          nutBore: isNut,
-        },
-      };
-    }
-
-    // 9. Pulley / Spacer (Polia / Roldana)
-    if (/\b(polia|roldana|pulley)\b/.test(norm)) {
-      const outerDiameter = nums[0] || 42;
-      const grooveDiameter = nums[1] || Math.round(outerDiameter * 0.75);
-      const boreDiameter = nums[2] || 8;
-      const height = nums[3] || 14;
-      return {
-        action: "CREATE",
-        type: "PULLEY",
-        name: `Polia_D${outerDiameter}`,
-        color: "#eab308",
-        params: { outerDiameter, grooveDiameter, boreDiameter, height },
-      };
-    }
-
-    // 8. Cylinder / Tube / Bushing (Cilindro / Tubo / Bucha)
-    if (/\b(cilindro|tubo|bucha|cylinder|tube|pipe|bushing)\b/.test(norm)) {
-      const diameter = nums[0] || 32;
-      const innerDiameter = /\b(tubo|bucha|tube|pipe|bushing)\b/.test(norm)
-        ? nums[1] && nums[1] < diameter
-          ? nums[1]
-          : Math.round(diameter * 0.65)
-        : 0;
-      const height = (innerDiameter ? nums[2] : nums[1]) || 40;
-      return {
-        action: "CREATE",
-        type: "CYLINDER",
-        name: innerDiameter > 0 ? `Tubo_D${diameter}_d${innerDiameter}` : `Cilindro_D${diameter}`,
-        color: "#10b981",
-        params: { diameter, innerDiameter, height, segments: 48 },
-      };
-    }
-
-    // 9. Default Box / Block
-    const width = nums[0] || 50;
-    const depth = nums[1] || 35;
-    const height = nums[2] || 20;
-    return {
-      action: "CREATE",
-      type: "BOX",
-      name: `Bloco_${width}x${depth}x${height}`,
-      color: "#f97316",
-      params: { width, depth, height, cornerRadius: 2, boreDiameter: mSize || 0 },
-    };
+    let type, params;
+    if (isGear) {
+      const teeth = norm.match(/(\d+)\s*(?:dentes|teeth)\b|\bz\s*(\d+)/);
+      type='SPUR_GEAR'; params={teeth:teeth?Number(teeth[1]||teeth[2]):24,module:named('modulo|module')??2,thickness:thickness??height??8,boreDiameter:bore??0,pressureAngle:named('angulo de pressao|pressure angle')??20};
+    } else if (isBracket) {
+      type='L_BRACKET';params={armA:named('aba a|arm a')??dims[0]??60,armB:named('aba b|arm b')??dims[1]??45,width:width??30,thickness:thickness??5,holeDiameter:bore??(m!==undefined?m+0.2:4.2),gusset:1};
+    } else if (isBearing) {
+      const b = /\b608\b/.test(norm)?22.2:(bore??diameter??22.2);
+      type='PILLOW_BLOCK';params={bearingBore:b,outerRingDia:Math.max(b+10,34),baseWidth:named('base|base width')??width??68,thickness:thickness??14,baseHeight:6,mountHoleDia:m!==undefined?m+0.2:4.4};
+    } else if (isLid) {
+      type='SNAP_LID_BOX';params={width:width??dims[0]??85,depth:depth??dims[1]??58,topThickness:thickness??3,lipHeight:4,wallThickness:named('parede|wall(?: thickness)?')??2.5,clearance:named('folga|clearance')??0.3,ventSlots:/\b(sem ventilacao|no vents)\b/.test(norm)?0:1};
+    } else if (isCase) {
+      type='ENCLOSURE';params={width:width??dims[0]??85,depth:depth??dims[1]??58,height:height??dims[2]??32,wallThickness:named('parede|wall(?: thickness)?')??2.5,standoffHeight:6,screwHole:2.8};
+    } else if (isBolt) {
+      const nut=/\b(porca|nut)\b/.test(norm),d=m??diameter??6;
+      type='HEX_BOLT';params={metricDia:d,shaftLength:nut?0:named('comprimento|length')??dims[1]??22,headWidth:Number((d*1.65).toFixed(2)),headHeight:Number((d*0.7).toFixed(2)),nutBore:nut?1:0};
+    } else if (isPulley) {
+      const d=diameter??40;
+      type='PULLEY';params={outerDiameter:d,grooveDiameter:named('pista|groove(?: diameter)?')??d*0.75,boreDiameter:bore??8,height:height??14};
+    } else if (isPlate) {
+      type='MOUNTING_PLATE';params={width:width??dims[0]??90,depth:depth??dims[1]??70,thickness:thickness??dims[2]??5,cornerRadius:6,holeDiameter:bore??(m!==undefined?m+0.2:4.2),centerBore:0};
+    } else if (isCylinder) {
+      const tube=/\b(tubo|bucha|tube|pipe|bushing)\b/.test(norm),d=diameter??dims[0]??32;
+      type='CYLINDER';params={diameter:d,innerDiameter:bore??(tube?named('interno|inner')??d*0.65:0),height:height??dims[1]??40,segments:48};
+    } else if (isSphere) { type='SPHERE';params={diameter:diameter??30,segments:36};
+    } else if (isCone) { type='CONE';params={bottomDiameter:diameter??34,topDiameter:named('topo|top diameter')??0,height:height??30};
+    } else if (isTorus) { type='TORUS';params={majorDiameter:diameter??38,tubeDiameter:thickness??8};
+    } else if (isBox) {type='BOX';params={width:width??dims[0]??50,depth:depth??dims[1]??35,height:height??dims[2]??20,cornerRadius:named('raio|radius')??0,boreDiameter:bore??0};}
+    else return null;
+    if (root.CadProject) params=root.CadProject.validateParams(type,params);
+    return {action:'CREATE',type,params,name:type,color:'#f97316'};
   }
 
   /**
@@ -1275,8 +1041,8 @@ ${tXml}
    */
   const DEMO_PROJECTS = {
     rover: {
-      titlePt: "Robô Rover Espacial (Demo SolidCraft)",
-      titleEn: "Space Rover Assembly (SolidCraft Demo)",
+      titlePt: "Robô Rover Espacial (Demonstração)",
+      titleEn: "Space Rover Assembly (Demo)",
       items: [
         {
           type: "BOX",
@@ -1440,7 +1206,7 @@ ${tXml}
         },
         {
           type: "PULLEY",
-          name: "Polia_Guia_GT2",
+          name: "Polia_Guia",
           color: "#38bdf8",
           params: { outerDiameter: 32, grooveDiameter: 24, boreDiameter: 5, height: 12 },
           pos: [18, 42, 0],
