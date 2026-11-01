@@ -2225,6 +2225,8 @@
   }
 
   $('#btnQuickExportStl').onclick = $('#printExportStlBin').onclick = exportStl;
+  $('#btnQuickExport3mf')?.addEventListener('click', () => exportFormat('3mf'));
+  $('#btnQuickExportStep')?.addEventListener('click', exportStepExact);
   $('#btnExport3mf').onclick = $('#printExport3mf').onclick = () => exportFormat('3mf');
   $('#btnExportStepExact')?.addEventListener("click", exportStepExact);
   $('#btnExportStep').onclick = $('#printExportStep').onclick = () => exportFormat('step');

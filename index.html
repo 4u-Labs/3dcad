@@ -93,8 +93,14 @@
             📂 <span data-i18n="importBtn">Importar STL/JSON</span>
             <input type="file" id="fileImportInput" accept=".stl,.json" hidden />
           </label>
-          <button type="button" class="hdr-btn primary" id="btnQuickExportStl">
+          <button type="button" class="hdr-btn primary" id="btnQuickExportStl" title="Exportar malha STL para fatiadores 3D">
             ⬇ <span data-i18n="exportStl">Exportar .STL</span>
+          </button>
+          <button type="button" class="hdr-btn" id="btnQuickExport3mf" title="Exportar 3MF para Bambu Studio, OrcaSlicer, PrusaSlicer">
+            ⬇ <span>.3MF</span>
+          </button>
+          <button type="button" class="hdr-btn" id="btnQuickExportStep" title="Exportar STEP analítico BRep / CAD">
+            ⬇ <span>.STEP</span>
           </button>
           <button type="button" class="hdr-btn" id="btnSaveProject" data-i18n="saveProject">💾 Salvar JSON</button>
           <button type="button" class="hdr-btn" id="btnHelp" data-i18n="help">? Ajuda</button>
