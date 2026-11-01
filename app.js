@@ -2721,8 +2721,15 @@
     if (Kernel) { Kernel.init().catch(() => {}); }
     try {
       const saved = await projectStore.load();
-      if (saved) restoreSceneFromItems(saved.solids);
-      else await loadDemoProject("jcb_3cx");
+      const isOldJcb = saved && saved.solids && saved.solids.some(s => {
+        const n = (s.name || "") + " " + (s.id || "");
+        return /jcb|Chassi_Trator|Capo_Motor|Cacamba_Traseira/i.test(n);
+      });
+      if (saved && !isOldJcb) {
+        restoreSceneFromItems(saved.solids);
+      } else {
+        await loadDemoProject("gearbox");
+      }
     } catch (error) {
       savedScene = "load-error";
       try {
