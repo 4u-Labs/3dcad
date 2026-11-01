@@ -2328,25 +2328,65 @@
       // Restore stages every object before committing. Invalid input leaves the scene intact.
       pushUndoSnapshot(); restoreSceneFromItems(doc.solids);
     } else if (/\.stl$/i.test(file.name)) {
-      const bytes = await file.arrayBuffer();
+      let bytes = await file.arrayBuffer();
       if (bytes.byteLength < 15) throw new Error(L('STL vazio ou inválido.', 'Empty or invalid STL.'));
       if (bytes.byteLength >= 84) {
         const count = new DataView(bytes).getUint32(80, true);
-        if (84 + count * 50 === bytes.byteLength && count > CadMesh.MAX_TRIANGLES) throw new Error(L('STL excede 1.000.000 triângulos.', 'STL exceeds 1,000,000 triangles.'));
+        const maxTris = CadMesh.MAX_TRIANGLES;
+        if (84 + count * 50 === bytes.byteLength && count > maxTris) {
+          const step = Math.ceil(count / maxTris);
+          const newCount = Math.floor(count / step);
+          const downsampled = new Uint8Array(84 + newCount * 50);
+          downsampled.set(new Uint8Array(bytes, 0, 80));
+          new DataView(downsampled.buffer).setUint32(80, newCount, true);
+          let outPos = 84;
+          for (let i = 0; i < count; i += step) {
+            if (outPos + 50 > downsampled.length) break;
+            downsampled.set(new Uint8Array(bytes, 84 + i * 50, 50), outPos);
+            outPos += 50;
+          }
+          bytes = downsampled.buffer;
+          showToast(L(`STL otimizado para ${newCount.toLocaleString()} triângulos.`, `STL optimized to ${newCount.toLocaleString()} triangles.`));
+        }
       }
       const raw = new THREE.STLLoader().parse(bytes);
       try {
-        if (raw.attributes.position.count / 3 > CadMesh.MAX_TRIANGLES) throw new Error(L('Malha grande demais.', 'Mesh is too large.'));
         raw.rotateX(-Math.PI / 2); // CAD Z-up -> internal Y-up, inverse of every exporter.
-        const normalized = CadMesh.fromMesh(new THREE.Mesh(raw), false);
-        if (!normalized.triangles.length) throw new Error(L('STL sem triângulos válidos.', 'STL has no valid triangles.'));
-        const geometry = CadMesh.toGeometry(normalized);
-        const record = {type:'STL_IMPORT',name:file.name.replace(/\.stl$/i,'').slice(0,160),color:'#38bdf8',params:{},pos:[0,0,0],geometry:{positions:Array.from(geometry.attributes.position.array),index:Array.from(geometry.index.array)}};
-        geometry.dispose();
+        const triCount = raw.attributes.position.count / 3;
+        let positions, index;
+        if (triCount <= 15000) {
+          const normalized = CadMesh.fromMesh(new THREE.Mesh(raw), false);
+          if (!normalized.triangles.length) throw new Error(L('STL sem triângulos válidos.', 'STL has no valid triangles.'));
+          const geometry = CadMesh.toGeometry(normalized);
+          positions = Array.from(geometry.attributes.position.array);
+          index = Array.from(geometry.index.array);
+          geometry.dispose();
+        } else {
+          positions = Array.from(raw.attributes.position.array);
+          index = null;
+        }
+        const record = {
+          type: 'STL_IMPORT',
+          name: file.name.replace(/\.stl$/i, '').slice(0, 160),
+          color: '#38bdf8',
+          params: {},
+          pos: [0, 0, 0],
+          geometry: { positions, index }
+        };
         const mesh = buildSolid(record.type, record);
-        try { if(solids.length>=CadProject.MAX_SOLIDS)throw new Error(L("Limite de peças atingido.","Part limit reached."));ensureCapacity(mesh.geometry); } catch(error) {disposeMesh(mesh);throw error;}
-        pushUndoSnapshot(); scene.add(mesh); solids.push(mesh); timelineStep = solids.length;
-        selectSolid(mesh); refreshAllUI();
+        try {
+          if (solids.length >= CadProject.MAX_SOLIDS) throw new Error(L('Limite de peças atingido.', 'Part limit reached.'));
+          ensureCapacity(mesh.geometry);
+        } catch (error) {
+          disposeMesh(mesh);
+          throw error;
+        }
+        pushUndoSnapshot();
+        scene.add(mesh);
+        solids.push(mesh);
+        timelineStep = solids.length;
+        selectSolid(mesh);
+        refreshAllUI();
       } finally { raw.dispose(); }
     } else if (/\.3mf$/i.test(file.name)) {
       const bytes = await file.arrayBuffer();
