@@ -406,6 +406,7 @@
       oldEdges.geometry?.dispose();
       oldEdges.material?.dispose();
     }
+    if (triangleCount(mesh.geometry) > 80000) return;
     try {
       const edgeGeom = new THREE.EdgesGeometry(mesh.geometry, 24);
       const edgeMat = new THREE.LineBasicMaterial({
@@ -490,7 +491,7 @@
   function triangleCount(geometry) { return (geometry.index?.count || geometry.attributes.position.count) / 3; }
   function ensureCapacity(geometry, except = null) {
     if (solids.filter(s=>s!==except).reduce((sum,s)=>sum+triangleCount(s.geometry),0)+triangleCount(geometry)>CadMesh.MAX_TRIANGLES)
-      throw new Error(L("Projeto excede 250.000 triângulos.", "Project exceeds 250,000 triangles."));
+      throw new Error(L("Projeto excede 1.000.000 triângulos.", "Project exceeds 1,000,000 triangles."));
   }
 
   function createParametricSolid(type, customOpts = {}) {
@@ -531,7 +532,7 @@
 
   function restoreSceneFromItems(items) {
     const records = CadProject.validateItems(items), staged = [];
-    try { let triangles=0;for (const item of records) { const mesh=buildSolid(item.type,item);staged.push(mesh);triangles+=triangleCount(mesh.geometry);if(triangles>CadMesh.MAX_TRIANGLES)throw new Error(L("Projeto excede 250.000 triângulos.", "Project exceeds 250,000 triangles.")); } }
+    try { let triangles=0;for (const item of records) { const mesh=buildSolid(item.type,item);staged.push(mesh);triangles+=triangleCount(mesh.geometry);if(triangles>CadMesh.MAX_TRIANGLES)throw new Error(L("Projeto excede 1.000.000 triângulos.", "Project exceeds 1,000,000 triangles.")); } }
     catch (error) { staged.forEach(disposeMesh); throw error; }
     const selectedId = selectedSolid?.userData.id;
     restoring = true;
@@ -2315,7 +2316,12 @@
 
   async function importFile(file) {
     if (!file) return;
-    if (file.size > CadProject.MAX_BYTES) throw new Error(L('Arquivo excede 32 MB.', 'File exceeds 32 MB.'));
+    const isJson = /\.json$/i.test(file.name);
+    const maxBytes = isJson ? CadProject.MAX_BYTES : (CadProject.MAX_IMPORT_BYTES || 150 * 1024 * 1024);
+    if (file.size > maxBytes) {
+      const mb = Math.round(maxBytes / (1024 * 1024));
+      throw new Error(L(`Arquivo excede ${mb} MB.`, `File exceeds ${mb} MB.`));
+    }
     flushEdits();
     if (/\.json$/i.test(file.name)) {
       const doc = CadProject.read(await file.text());
@@ -2326,7 +2332,7 @@
       if (bytes.byteLength < 15) throw new Error(L('STL vazio ou inválido.', 'Empty or invalid STL.'));
       if (bytes.byteLength >= 84) {
         const count = new DataView(bytes).getUint32(80, true);
-        if (84 + count * 50 === bytes.byteLength && count > CadMesh.MAX_TRIANGLES) throw new Error(L('STL excede 250.000 triângulos.', 'STL exceeds 250,000 triangles.'));
+        if (84 + count * 50 === bytes.byteLength && count > CadMesh.MAX_TRIANGLES) throw new Error(L('STL excede 1.000.000 triângulos.', 'STL exceeds 1,000,000 triangles.'));
       }
       const raw = new THREE.STLLoader().parse(bytes);
       try {
@@ -2367,7 +2373,7 @@
       zoomFitScene();
       showToast(L(`3MF importado com sucesso: ${added} peça(s).`, `3MF imported successfully: ${added} part(s).`));
       return;
-    } else throw new Error(L('Escolha um arquivo STL ou JSON.', 'Choose an STL or JSON file.'));
+    } else throw new Error(L('Escolha um arquivo 3MF, STL ou JSON.', 'Choose a 3MF, STL or JSON file.'));
     zoomFitScene(); showToast(L('Projeto importado. Posições preservadas.', 'Project imported. Positions preserved.'));
   }
   ['#fileImportInput', '#fileImportInputSide', '#fileImportInputRibbon'].forEach(sel => {

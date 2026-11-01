@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
   const EPS = 1e-5;
-  const MAX_TRIANGLES = 250000;
+  const MAX_TRIANGLES = 1000000;
   const key = (a, b) => a < b ? `${a}:${b}` : `${b}:${a}`;
   const fail = (pt, en) => { throw new Error(`${pt} / ${en}`); };
 
@@ -28,7 +28,7 @@
   }
 
   function normalize(vertices, triangles, repair = true) {
-    if (triangles.length > MAX_TRIANGLES) fail("Malha excede 250.000 triângulos", "Mesh exceeds 250,000 triangles");
+    if (triangles.length > MAX_TRIANGLES) fail("Malha excede o limite de triângulos", "Mesh exceeds triangle limit");
     const welded = [], mapped = new Map(), ids = [], uniqueFaces = new Set();
     const add = v => {
       if (!v.every(Number.isFinite)) fail("Coordenada inválida na malha", "Invalid mesh coordinate");

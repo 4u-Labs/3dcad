@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const root=path.resolve(__dirname,'..');
-function core(){const context={console,Blob,TextEncoder,TextDecoder,Uint8Array,Uint32Array,DataView,ArrayBuffer,URL,setTimeout,clearTimeout};context.window=context;vm.createContext(context);for(const file of ['libs/three.min.js','libs/three-csg.js','libs/STLLoader.js','cad_mesh.js','cad_generators.js','cad_project.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context,{filename:file});return context;}
+function core(){const context={console,Blob,TextEncoder,TextDecoder,Uint8Array,Uint32Array,DataView,ArrayBuffer,URL,setTimeout,clearTimeout,ReadableStream:globalThis.ReadableStream,DecompressionStream:globalThis.DecompressionStream};context.window=context;vm.createContext(context);for(const file of ['libs/three.min.js','libs/three-csg.js','libs/STLLoader.js','cad_mesh.js','cad_generators.js','cad_project.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context,{filename:file});return context;}
 function app(){
  const {JSDOM}=require('jsdom'),{IDBFactory}=require('fake-indexeddb');
  const dom=new JSDOM(fs.readFileSync(path.join(root,'index.html'),'utf8'),{url:'http://localhost/3dcad/',runScripts:'outside-only',pretendToBeVisual:true});

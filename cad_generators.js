@@ -965,7 +965,7 @@
    * Universal 3MF Package Reader: Unpacks ZIP archive, reads 3dmodel.model and nested object models,
    * converts CAD Z-up to Three.js Y-up, and returns valid part records.
    */
-  async function parse3MF(arrayBuffer, maxTriangles = 250000, maxParts = 150) {
+  async function parse3MF(arrayBuffer, maxTriangles = 750000, maxParts = 150) {
     const buffer = new Uint8Array(arrayBuffer);
     const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
@@ -1079,6 +1079,27 @@
         }
 
         if (positions.length >= 9 && indices.length >= 3) {
+          let finalIndices = indices;
+          let finalPositions = positions;
+          if (indices.length / 3 > maxTriangles) {
+            const step = Math.ceil((indices.length / 3) / maxTriangles);
+            const remappedIndices = [];
+            const vertexMap = new Map();
+            const remappedPositions = [];
+            for (let i = 0; i < indices.length; i += 3 * step) {
+              const v1 = indices[i], v2 = indices[i + 1], v3 = indices[i + 2];
+              for (const v of [v1, v2, v3]) {
+                if (!vertexMap.has(v)) {
+                  const newIdx = remappedPositions.length / 3;
+                  remappedPositions.push(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2]);
+                  vertexMap.set(v, newIdx);
+                }
+              }
+              remappedIndices.push(vertexMap.get(v1), vertexMap.get(v2), vertexMap.get(v3));
+            }
+            finalIndices = remappedIndices;
+            finalPositions = remappedPositions;
+          }
           parts.push({
             type: "MESH",
             name: partName,
@@ -1088,7 +1109,7 @@
             scale: [1, 1, 1],
             visible: true,
             params: {},
-            geometry: { positions, index: indices }
+            geometry: { positions: finalPositions, index: finalIndices }
           });
         }
       }
