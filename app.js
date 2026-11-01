@@ -2340,6 +2340,11 @@
         pushUndoSnapshot(); scene.add(mesh); solids.push(mesh); timelineStep = solids.length;
         selectSolid(mesh); refreshAllUI();
       } finally { raw.dispose(); }
+    } else if (/\.3mf$/i.test(file.name)) {
+      throw new Error(L(
+        'Arquivo 3MF multi-mesa da Bambu detectado. Abra diretamente no Bambu Studio para imprimir na sua A1, ou use arquivos de peças em STL para editar no CAD.',
+        'Bambu multi-plate 3MF detected. Open directly in Bambu Studio to print on your A1, or import individual parts in STL to edit in CAD.'
+      ));
     } else throw new Error(L('Escolha um arquivo STL ou JSON.', 'Choose an STL or JSON file.'));
     zoomFitScene(); showToast(L('Projeto importado. Posições preservadas.', 'Project imported. Positions preserved.'));
   }
