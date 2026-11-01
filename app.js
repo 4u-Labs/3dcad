@@ -60,6 +60,7 @@
       vLeft: "Esquerda",
       vBack: "Trás",
       demosHeader: "Projetos Exemplo (1 Clique)",
+      demoJcb: "Retroescavadeira JCB 3CX",
       demoRover: "Robô Rover (SolidCraft)",
       demoGearbox: "Redutor de Engrenagens",
       demoEnclosure: "Caixa Eletrônica IoT",
@@ -176,6 +177,7 @@
       vLeft: "Left",
       vBack: "Back",
       demosHeader: "1-Click Demo Projects",
+      demoJcb: "JCB 3CX Backhoe Loader",
       demoRover: "Space Rover (SolidCraft)",
       demoGearbox: "Spur Gear Reduction",
       demoEnclosure: "IoT Electronics Box",
@@ -2637,7 +2639,7 @@
     try {
       const saved = await projectStore.load();
       if (saved) restoreSceneFromItems(saved.solids);
-      else loadDemoProject("rover");
+      else loadDemoProject("jcb_3cx");
     } catch (error) {
       savedScene = "load-error";
       try {
