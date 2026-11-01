@@ -117,6 +117,18 @@
 
       <!-- CONTEXTUAL RIBBON TOOLBAR -->
       <section class="ribbon-bar" aria-label="Ferramentas CAD">
+        <!-- Arquivo / Importação -->
+        <div class="ribbon-group">
+          <div class="ribbon-btns">
+            <label class="tool-btn cyan-accent" title="Abrir arquivo STL ou Projeto JSON" style="cursor:pointer">
+              <span class="ico">📂</span>
+              <span class="lbl" data-i18n="importBtn">Abrir</span>
+              <input type="file" id="fileImportInputRibbon" accept=".stl,.json" hidden />
+            </label>
+          </div>
+          <span class="ribbon-label" data-i18n="grpFile">Arquivo</span>
+        </div>
+
         <!-- Sketch 2D -->
         <div class="ribbon-group">
           <div class="ribbon-btns">
@@ -305,9 +317,15 @@
         <aside class="left-browser" id="leftBrowser">
           <div class="panel-head">
             <span data-i18n="browserTitle">Árvore do Projeto</span>
-            <button type="button" class="tree-act-btn" id="btnClearScene" title="Limpar Cena">
-              🗑 <span data-i18n="clearBtn">Limpar</span>
-            </button>
+            <div style="display:flex; gap:5px; align-items:center;">
+              <label class="tree-act-btn" title="Abrir arquivo STL ou JSON" style="cursor: pointer; color: var(--accent-cyan); border-color: rgba(56,189,248,0.4);">
+                📂 <span data-i18n="openBtn">Abrir</span>
+                <input type="file" id="fileImportInputSide" accept=".stl,.json" hidden />
+              </label>
+              <button type="button" class="tree-act-btn" id="btnClearScene" title="Limpar Cena">
+                🗑 <span data-i18n="clearBtn">Limpar</span>
+              </button>
+            </div>
           </div>
 
           <div class="browser-scroll">

@@ -2343,9 +2343,11 @@
     } else throw new Error(L('Escolha um arquivo STL ou JSON.', 'Choose an STL or JSON file.'));
     zoomFitScene(); showToast(L('Projeto importado. Posições preservadas.', 'Project imported. Positions preserved.'));
   }
-  $('#fileImportInput').addEventListener('change', async e => {
-    const file = e.target.files?.[0]; e.target.value = '';
-    try { await importFile(file); } catch (error) { showToast(error.message); }
+  ['#fileImportInput', '#fileImportInputSide', '#fileImportInputRibbon'].forEach(sel => {
+    $(sel)?.addEventListener('change', async e => {
+      const file = e.target.files?.[0]; e.target.value = '';
+      try { await importFile(file); } catch (error) { showToast(error.message); }
+    });
   });
 
   window.addEventListener('dragover', e => {
