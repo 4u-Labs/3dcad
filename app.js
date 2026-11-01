@@ -2348,6 +2348,18 @@
     try { await importFile(file); } catch (error) { showToast(error.message); }
   });
 
+  window.addEventListener('dragover', e => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  });
+  window.addEventListener('drop', async e => {
+    e.preventDefault();
+    const file = e.dataTransfer?.files?.[0];
+    if (file) {
+      try { await importFile(file); } catch (error) { showToast(error.message); }
+    }
+  });
+
   let proposedCommand = null;
   function previewCommand(text) {
     try {
