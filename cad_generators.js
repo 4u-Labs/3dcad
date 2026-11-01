@@ -1041,8 +1041,9 @@
    */
   const DEMO_PROJECTS = {
     jcb_3cx: {
-      titlePt: "Retroescavadeira JCB 3CX (Demonstração)",
-      titleEn: "JCB 3CX Backhoe Loader Assembly (Demo)",
+      titlePt: "Retroescavadeira JCB 3CX (Montagem Real CAD)",
+      titleEn: "JCB 3CX Backhoe Loader CAD Assembly",
+      file: "assets/jcb_3cx_assembly.json",
       items: [
         {
           type: "BOX",

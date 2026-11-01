@@ -2429,9 +2429,26 @@
   };
 
   // Demo Projects & Timeline Scrubber
-  function loadDemoProject(key) {
+  async function loadDemoProject(key) {
     const demo = CadGenerators.DEMO_PROJECTS[key];
     if (!demo) return;
+    if (demo.file) {
+      try {
+        const resp = await fetch(demo.file);
+        if (resp.ok) {
+          const doc = await resp.json();
+          if (doc && Array.isArray(doc.solids) && doc.solids.length > 0) {
+            pushUndoSnapshot();
+            restoreSceneFromItems(doc.solids);
+            zoomFitScene();
+            showToast(L(demo.titlePt, demo.titleEn));
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch demo file, falling back to items:", err);
+      }
+    }
     pushUndoSnapshot();
     restoreSceneFromItems(demo.items);
     zoomFitScene();
@@ -2639,7 +2656,7 @@
     try {
       const saved = await projectStore.load();
       if (saved) restoreSceneFromItems(saved.solids);
-      else loadDemoProject("jcb_3cx");
+      else await loadDemoProject("jcb_3cx");
     } catch (error) {
       savedScene = "load-error";
       try {
