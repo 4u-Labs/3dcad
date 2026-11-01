@@ -24,6 +24,18 @@ test('3MF ZIP has valid CRC, closed shared indices, separate objects and colors'
  for(const o of objects){const vs=[...o.querySelectorAll('vertex')].map(v=>['x','y','z'].map(a=>Number(v.getAttribute(a))));const ts=[...o.querySelectorAll('triangle')].map(v=>['v1','v2','v3'].map(a=>Number(v.getAttribute(a))));const d=M.topology(vs,ts);assert.equal(d.boundaryEdges,0);assert.equal(d.nonManifoldEdges,0);}
  assert.equal(objects[0].querySelectorAll('vertex').length,8);dom.window.close();
 });
+test('3MF parse3MF unpacks packages, extracts vertices/triangles and preserves names and colors',async()=>{
+ const a=mesh(),b=mesh('SPHERE',{diameter:10,segments:16});a.userData={name:'BoxPart',color:'#ff0000'};b.userData={name:'SpherePart',color:'#00ff00'};b.position.x=50;
+ const blob=C.exportMeshesTo3MF([a,b]);
+ const parts=await C.parse3MF(await blob.arrayBuffer());
+ assert.equal(parts.length,2);
+ assert.equal(parts[0].name,'BoxPart');
+ assert.equal(parts[0].geometry.positions.length,24);
+ assert.equal(parts[0].geometry.index.length,36);
+ assert.equal(parts[0].color.toLowerCase(),'#ff0000');
+ assert.equal(parts[1].name,'SpherePart');
+ assert.equal(parts[1].color.toLowerCase(),'#00ff00');
+});
 test('invalid/open mesh is refused by 3MF and STEP while STL remains explicit mesh exchange',()=>{
  const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute([0,0,0,10,0,0,0,10,0],3));const m=new T.Mesh(g);
  assert.throws(()=>C.exportMeshesTo3MF([m]),/Open or invalid/);assert.throws(()=>C.exportMeshesToSTEP([m]),/Open or invalid/);assert(M.stl([m]).size>84);

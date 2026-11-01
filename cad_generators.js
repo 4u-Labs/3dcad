@@ -962,6 +962,163 @@
   function exportMeshesToSTEP(meshes) { return root.CadMesh.step(meshes); }
 
   /**
+   * Universal 3MF Package Reader: Unpacks ZIP archive, reads 3dmodel.model and nested object models,
+   * converts CAD Z-up to Three.js Y-up, and returns valid part records.
+   */
+  async function parse3MF(arrayBuffer, maxTriangles = 250000, maxParts = 150) {
+    const buffer = new Uint8Array(arrayBuffer);
+    const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+
+    // 1. Locate End of Central Directory
+    let eocd = -1;
+    for (let i = buffer.byteLength - 22; i >= Math.max(0, buffer.byteLength - 65557); i--) {
+      if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+
+    const entries = {};
+    if (eocd !== -1) {
+      const cdCount = view.getUint16(eocd + 10, true);
+      const cdOffset = view.getUint32(eocd + 16, true);
+      let p = cdOffset;
+      for (let i = 0; i < cdCount; i++) {
+        if (view.getUint32(p, true) !== 0x02014b50) break;
+        const method = view.getUint16(p + 10, true);
+        const compSize = view.getUint32(p + 20, true);
+        const uncompSize = view.getUint32(p + 24, true);
+        const nameLen = view.getUint16(p + 28, true);
+        const extraLen = view.getUint16(p + 30, true);
+        const commentLen = view.getUint16(p + 32, true);
+        const localOffset = view.getUint32(p + 42, true);
+        const name = new TextDecoder().decode(new Uint8Array(buffer.buffer, buffer.byteOffset + p + 46, nameLen));
+
+        const localNameLen = view.getUint16(localOffset + 26, true);
+        const localExtraLen = view.getUint16(localOffset + 28, true);
+        const dataOffset = localOffset + 30 + localNameLen + localExtraLen;
+        entries[name] = { method, compSize, uncompSize, dataOffset };
+        p += 46 + nameLen + extraLen + commentLen;
+      }
+    } else {
+      let offset = 0;
+      while (offset < buffer.byteLength - 30) {
+        if (view.getUint32(offset, true) === 0x04034b50) {
+          const method = view.getUint16(offset + 8, true);
+          const compSize = view.getUint32(offset + 18, true);
+          const uncompSize = view.getUint32(offset + 22, true);
+          const nameLen = view.getUint16(offset + 26, true);
+          const extraLen = view.getUint16(offset + 28, true);
+          const name = new TextDecoder().decode(new Uint8Array(buffer.buffer, buffer.byteOffset + offset + 30, nameLen));
+          const dataOffset = offset + 30 + nameLen + extraLen;
+          entries[name] = { method, compSize, uncompSize, dataOffset };
+          offset = dataOffset + compSize;
+        } else {
+          offset++;
+        }
+      }
+    }
+
+    async function decompress(entry) {
+      const slice = buffer.subarray(entry.dataOffset, entry.dataOffset + entry.compSize);
+      if (entry.method === 0) return new TextDecoder().decode(slice);
+      if (typeof DecompressionStream !== "undefined") {
+        const stream = new ReadableStream({ start(c) { c.enqueue(slice); c.close(); } });
+        const decomp = stream.pipeThrough(new DecompressionStream("deflate-raw"));
+        const r = decomp.getReader();
+        const chunks = [];
+        while (true) {
+          const { done, value } = await r.read();
+          if (done) break;
+          chunks.push(value);
+        }
+        const totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0);
+        const merged = new Uint8Array(totalLen);
+        let pos = 0;
+        for (const c of chunks) { merged.set(c, pos); pos += c.byteLength; }
+        return new TextDecoder().decode(merged);
+      }
+      if (typeof require !== "undefined") {
+        try {
+          const zlib = require("zlib");
+          return zlib.inflateRawSync(slice).toString("utf8");
+        } catch {}
+      }
+      throw new Error("DecompressionStream unsupported");
+    }
+
+    function parseModelXml(xml, sourceName = "part") {
+      const colors = [];
+      const baseMatMatches = xml.matchAll(/<base\s+[^>]*displaycolor=["\x27](#[0-9a-fA-F]{6,8})/gi);
+      for (const m of baseMatMatches) colors.push(m[1].slice(0, 7));
+
+      const objRegex = /<object\s+([^>]*?)>([\s\S]*?)<\/object>/gi;
+      let objMatch;
+      const parts = [];
+
+      while ((objMatch = objRegex.exec(xml)) !== null) {
+        const attrs = objMatch[1];
+        const body = objMatch[2];
+        if (!body.includes("<mesh")) continue;
+
+        const nameMatch = attrs.match(/name=["\x27]([^"\x27]+)/i);
+        const pidMatch = attrs.match(/pindex=["\x27]([^"\x27]+)/i);
+        const partName = (nameMatch ? nameMatch[1] : sourceName).replace(/[^\w\s-]/g, "_").slice(0, 80);
+        const color = (pidMatch && colors[parseInt(pidMatch[1], 10)]) || "#f59e0b";
+
+        const positions = [];
+        const vRegex = /<vertex\s+x=["\x27]([^"\x27]+)["\x27]\s+y=["\x27]([^"\x27]+)["\x27]\s+z=["\x27]([^"\x27]+)/gi;
+        let vm;
+        while ((vm = vRegex.exec(body)) !== null) {
+          const x = parseFloat(vm[1]), y = parseFloat(vm[2]), z = parseFloat(vm[3]);
+          positions.push(x, z, -y); // CAD Z-up -> Three.js Y-up
+        }
+
+        const indices = [];
+        const tRegex = /<triangle\s+v1=["\x27]([^"\x27]+)["\x27]\s+v2=["\x27]([^"\x27]+)["\x27]\s+v3=["\x27]([^"\x27]+)/gi;
+        let tm;
+        while ((tm = tRegex.exec(body)) !== null) {
+          indices.push(parseInt(tm[1], 10), parseInt(tm[2], 10), parseInt(tm[3], 10));
+        }
+
+        if (positions.length >= 9 && indices.length >= 3) {
+          parts.push({
+            type: "MESH",
+            name: partName,
+            color,
+            pos: [0, 0, 0],
+            rot: [0, 0, 0],
+            scale: [1, 1, 1],
+            visible: true,
+            params: {},
+            geometry: { positions, index: indices }
+          });
+        }
+      }
+      return parts;
+    }
+
+    const results = [];
+    let accumulatedTriangles = 0;
+    const modelKeys = Object.keys(entries).filter(k => k.toLowerCase().endsWith(".model"));
+    modelKeys.sort((a, b) => (a.includes("3dmodel.model") ? -1 : b.includes("3dmodel.model") ? 1 : 0));
+
+    for (const k of modelKeys) {
+      if (results.length >= maxParts) break;
+      const xml = await decompress(entries[k]);
+      const basename = k.split("/").pop().replace(/\.model$/i, "");
+      const parts = parseModelXml(xml, basename);
+      for (const p of parts) {
+        const triCount = p.geometry.index.length / 3;
+        if (accumulatedTriangles + triCount > maxTriangles && results.length > 0) {
+          break;
+        }
+        accumulatedTriangles += triCount;
+        results.push(p);
+        if (results.length >= maxParts) break;
+      }
+    }
+    return results;
+  }
+
+  /**
    * Natural Language Prompt Parser (PT-BR & EN) -> Parametric Feature Action
    */
   function parseCadPrompt(rawText) {
@@ -1454,6 +1611,7 @@
     buildParametricGeometry,
     analyzeMeshFor3DPrint,
     exportMeshesTo3MF,
+    parse3MF,
     exportMeshesToOBJ,
     exportMeshesToSTEP,
     parseCadPrompt,

@@ -2343,10 +2343,30 @@
         selectSolid(mesh); refreshAllUI();
       } finally { raw.dispose(); }
     } else if (/\.3mf$/i.test(file.name)) {
-      throw new Error(L(
-        'Arquivo 3MF multi-mesa da Bambu detectado. Abra diretamente no Bambu Studio para imprimir na sua A1, ou use arquivos de peças em STL para editar no CAD.',
-        'Bambu multi-plate 3MF detected. Open directly in Bambu Studio to print on your A1, or import individual parts in STL to edit in CAD.'
-      ));
+      const bytes = await file.arrayBuffer();
+      if (bytes.byteLength < 30) throw new Error(L('Arquivo 3MF vazio ou inválido.', 'Empty or invalid 3MF file.'));
+      const parts = await CadGenerators.parse3MF(bytes);
+      if (!parts || !parts.length) {
+        throw new Error(L('Nenhum modelo 3D encontrado dentro do 3MF.', 'No 3D models found inside the 3MF.'));
+      }
+      pushUndoSnapshot();
+      let added = 0;
+      for (const record of parts) {
+        if (solids.length >= CadProject.MAX_SOLIDS) break;
+        record.id = `import_3mf_${Date.now()}_${added + 1}`;
+        record.name = (record.name || `${file.name.replace(/\.3mf$/i, '')}_${added + 1}`).slice(0, 80);
+        const mesh = buildSolid(record.type, record);
+        try { ensureCapacity(mesh.geometry); } catch (e) { disposeMesh(mesh); break; }
+        scene.add(mesh);
+        solids.push(mesh);
+        added++;
+      }
+      timelineStep = solids.length;
+      if (solids.length > 0) selectSolid(solids.at(-1));
+      refreshAllUI();
+      zoomFitScene();
+      showToast(L(`3MF importado com sucesso: ${added} peça(s).`, `3MF imported successfully: ${added} part(s).`));
+      return;
     } else throw new Error(L('Escolha um arquivo STL ou JSON.', 'Choose an STL or JSON file.'));
     zoomFitScene(); showToast(L('Projeto importado. Posições preservadas.', 'Project imported. Positions preserved.'));
   }
