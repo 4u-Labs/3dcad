@@ -32,6 +32,20 @@ test('CadAssistant: finds bearing 608 specifications', async () => {
   assert(res.text.includes('22,2') || res.text.includes('22.2'));
 });
 
+test('CadAssistant: answers save / export file extensions queries accurately', async () => {
+  const res = await globalThis.CadAssistant.answerQuestion('consigo salvar em que extensao', 'pt');
+  assert.equal(res.found, true);
+  assert.equal(res.item.id, 'save_export_extensions');
+  assert(res.text.includes('.STL') && res.text.includes('.3MF') && res.text.includes('.STEP') && res.text.includes('.JSON') && res.text.includes('.PNG'));
+});
+
+test('CadAssistant: answers universal open files queries', async () => {
+  const res = await globalThis.CadAssistant.answerQuestion('como abrir ou importar arquivos stl e step?', 'pt');
+  assert.equal(res.found, true);
+  assert.equal(res.item.id, 'open_files_universal');
+  assert(res.text.includes('.JSON') || res.text.includes('Abrir'));
+});
+
 test('CadAssistant: returns helpful fallback for unknown queries', async () => {
   const res = await globalThis.CadAssistant.answerQuestion('xyzqwerty inexistente 12345', 'pt');
   assert.equal(res.found, false);

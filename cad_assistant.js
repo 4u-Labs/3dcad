@@ -31,7 +31,13 @@
     'restricao': ['solver', 'horizontal', 'vertical', 'coincidente', 'distancia', 'paralela', 'perpendicular', 'dof'],
     'montagem': ['junta', 'articulacao', 'assembly', 'revolute', 'slider', 'rotacao', 'translacao', 'cinematica'],
     'arredondar': ['fillet', 'chanfro', 'chamfer', 'casca', 'shell', 'aresta', 'acabamento', 'brep'],
-    'offline': ['pwa', 'instalar', 'sem internet', 'local', 'privacidade', 'indexeddb', 'salvar'],
+    'offline': ['pwa', 'instalar', 'sem internet', 'local', 'privacidade', 'indexeddb', 'armazenamento'],
+    'salvar': ['exportar', 'extensao', 'extensoes', 'formato', 'formatos', 'json', 'stl', '3mf', 'step', 'stp', 'png', 'guardar', 'baixar', 'save'],
+    'extensao': ['extensoes', 'formato', 'formatos', 'salvar', 'exportar', 'stl', '3mf', 'step', 'stp', 'json', 'png', 'arquivo', 'extension', 'extensions'],
+    'extensoes': ['extensao', 'formato', 'formatos', 'salvar', 'exportar', 'stl', '3mf', 'step', 'stp', 'json', 'png', 'arquivos', 'extensions'],
+    'formato': ['formatos', 'extensao', 'extensoes', 'salvar', 'exportar', 'stl', '3mf', 'step', 'stp', 'json', 'png', 'tipo', 'arquivo', 'format'],
+    'formatos': ['formato', 'extensao', 'extensoes', 'salvar', 'exportar', 'stl', '3mf', 'step', 'stp', 'json', 'png', 'tipos', 'arquivos', 'formats'],
+    'exportar': ['salvar', 'extensao', 'extensoes', 'formato', 'formatos', 'stl', '3mf', 'step', 'stp', 'json', 'png', 'fatiador', 'slicer', 'export'],
     'medir': ['trena', 'caliper', 'distancia', 'pontos', 'medicao', 'mm'],
     'trena': ['medir', 'caliper', 'distancia', 'dimensao']
   };
@@ -46,19 +52,50 @@
       summaryPt: 'O botão "Abrir" é universal: ele aceita projetos nativos .JSON e modelos 3D nos formatos .STL, .3MF e .STEP.',
       summaryEn: 'The "Open" button is universal: it accepts native .JSON projects and 3D models in .STL, .3MF, and .STEP formats.',
       stepsPt: [
-        '• Botão Universal "Abrir": Clique em "Abrir" na barra superior (ou na fita de ferramentas, ou na lateral da Árvore de Peças).',
-        '• Se escolher um arquivo .JSON: O app abre o projeto completo com todas as peças, histórico de medidas e juntas de montagem.',
-        '• Se escolher .STL, .3MF ou .STEP: O app traz o modelo 3D diretamente para a mesa de impressão, somando à cena atual.',
-        '• Arrastar e Soltar: Você também pode simplesmente arrastar qualquer arquivo .STL, .3MF, .STEP ou .JSON do seu computador para dentro da tela do navegador!'
+        'Botão Universal "Abrir": Clique em "Abrir" na barra superior (ou na fita de ferramentas, ou na lateral da Árvore de Peças).',
+        'Se escolher um arquivo .JSON: O app abre o projeto completo com todas as peças, histórico de medidas e juntas de montagem.',
+        'Se escolher .STL, .3MF ou .STEP: O app traz o modelo 3D diretamente para a mesa de impressão, somando à cena atual.',
+        'Arrastar e Soltar: Você também pode simplesmente arrastar qualquer arquivo .STL, .3MF, .STEP ou .JSON do seu computador para dentro da tela do navegador!'
       ],
       stepsEn: [
-        '• Universal "Open" Button: Click "Open" on the top bar (or ribbon, or sidebar project tree).',
-        '• Choosing a .JSON file: The app opens the complete project restoring all parts, dimensions, and kinematic joints.',
-        '• Choosing .STL, .3MF, or .STEP: The app inserts the 3D model directly onto the build plate, alongside existing parts.',
-        '• Drag & Drop: You can also simply drag and drop any .STL, .3MF, .STEP, or .JSON file directly onto the browser window!'
+        'Universal "Open" Button: Click "Open" on the top bar (or ribbon, or sidebar project tree).',
+        'Choosing a .JSON file: The app opens the complete project restoring all parts, dimensions, and kinematic joints.',
+        'Choosing .STL, .3MF, or .STEP: The app inserts the 3D model directly onto the build plate, alongside existing parts.',
+        'Drag & Drop: You can also simply drag and drop any .STL, .3MF, .STEP, or .JSON file directly onto the browser window!'
       ],
       tipPt: 'Arquivos grandes de até 150 MB são suportados com decimação automática suave para malhas acima de 1 milhão de polígonos.',
       tipEn: 'Large files up to 150 MB are supported with automatic non-blocking decimation for meshes over 1,000,000 triangles.'
+    },
+    {
+      id: 'save_export_extensions',
+      categories: ['files', 'export', 'formats'],
+      keywords: [
+        'salvar', 'exportar', 'extensao', 'extensoes', 'formato', 'formatos', 'extension', 'extensions',
+        'formats', 'save', 'export', 'stl', '3mf', 'step', 'stp', 'json', 'png', 'quais', 'consigo',
+        'salvar projeto', 'guardar', 'baixar', 'download'
+      ],
+      titlePt: 'Extensões e Formatos Suportados para Salvar e Exportar (.STL, .3MF, .STEP, .JSON, .PNG)',
+      titleEn: 'Supported File Extensions and Formats for Saving and Exporting (.STL, .3MF, .STEP, .JSON, .PNG)',
+      summaryPt: 'O 3DCad Studio permite salvar e exportar seus modelos em 5 formatos diferentes de acordo com sua finalidade técnica:',
+      summaryEn: '3DCad Studio allows saving and exporting your designs into 5 different formats tailored for your engineering workflow:',
+      stepsPt: [
+        '.STL (Malha para Impressão 3D): Formato padrão para fatiadores como Bambu Studio, Cura, OrcaSlicer e PrusaSlicer. Clique em "Exportar .STL" na barra superior.',
+        '.3MF (Manufatura Multicor/Multicorpos): Formato moderno compactado (ZIP) que preserva peças separadas e cores individuais para impressão 3D. Clique em ".3MF" na fita de ferramentas.',
+        '.STEP / .STP (Engenharia CAD B-Rep Analítico ou Facetado): Padrão industrial ISO 10303-21 para intercâmbio com SolidWorks, Fusion 360, FreeCAD e Inventor. Use ".STEP Analítico" para curvas e cilindros matemáticos exatos, ou ".STEP Facetado" para malhas poligonais e resultados CSG.',
+        '.JSON (Projeto Paramétrico Completo do 3DCad): Salva todo o histórico de medidas, parâmetros editáveis, esboços 2D e juntas cinemáticas de montagem para você reabrir e continuar editando depois. Clique em "Salvar JSON" na barra superior.',
+        '.PNG (Foto / Render da Cena): Captura uma imagem de alta resolução da área de trabalho 3D para documentação técnica ou catálogos. Clique em "Salvar foto PNG" na barra de visualização.',
+        'Bônus - Salvamento Automático Local: Seu projeto é salvo continuamente no banco IndexedDB do seu próprio navegador com total privacidade (zero nuvem)!'
+      ],
+      stepsEn: [
+        '.STL (3D Printing Mesh): Standard manifold mesh for slicers such as Bambu Studio, Cura, OrcaSlicer, and PrusaSlicer. Click "Export .STL" on the top bar.',
+        '.3MF (Multi-color / Multi-body): Modern compressed (ZIP) package preserving separate bodies and colors for 3D printing. Click ".3MF" on the ribbon.',
+        '.STEP / .STP (Engineering CAD B-Rep Analytic or Faceted): Industry standard ISO 10303-21 for SolidWorks, Fusion 360, FreeCAD, and Inventor. Use "Analytic .STEP" for exact mathematical curves and cylinders, or "Faceted .STEP" for mesh solids.',
+        '.JSON (Full Parametric 3DCad Project): Saves complete parametric history, dimensions, 2D sketches, and kinematic joints so you can reopen and keep editing anytime. Click "Save JSON" on the top bar.',
+        '.PNG (Viewport Render / Photo): Takes a high-resolution snapshot of the 3D scene for technical documentation. Click "Save PNG image" on the view bar.',
+        'Bonus - Local Auto-Save: Projects are continuously stored directly in your browser\'s IndexedDB with zero cloud dependencies!'
+      ],
+      tipPt: 'Para garantir compatibilidade com fatiadores antes de exportar STL ou 3MF, use o botão "Assentar na Mesa Z=0".',
+      tipEn: 'To ensure slicer compatibility before exporting STL or 3MF, click "Drop to Bed (Z=0)".'
     },
     {
       id: 'csg_boolean_drill',
@@ -298,7 +335,7 @@
     {
       id: 'privacy_and_offline',
       categories: ['privacy', 'pwa'],
-      keywords: ['offline', 'privacidade', 'pwa', 'instalar', 'sem internet', 'local', 'indexeddb', 'salvar', 'seguranca', 'nuvem'],
+      keywords: ['offline', 'privacidade', 'pwa', 'instalar', 'sem internet', 'local', 'indexeddb', 'seguranca', 'nuvem', 'armazenamento', 'recuperar'],
       titlePt: 'Privacidade, Salvamento Local e Uso Offline (PWA)',
       titleEn: 'Privacy, Local Storage, and Offline PWA Operation',
       summaryPt: 'O 3DCad Studio é 100% privado e client-side: nenhum arquivo, modelo ou coordenada é enviado para a nuvem.',
@@ -348,12 +385,21 @@
       if (title.includes(qNorm)) score += 100;
       if (summary.includes(qNorm)) score += 50;
 
-      // Token matches
+      // Direct query token matches get highest priority
+      for (const tok of qTokens) {
+        if (title.includes(tok)) score += 40;
+        if (item.keywords.some(k => normalize(k) === tok || normalize(k).includes(tok))) score += 30;
+        if (summary.includes(tok)) score += 15;
+        if (steps.includes(tok)) score += 6;
+      }
+
+      // Expanded synonym matches provide semantic discovery without overpowering exact terms
       for (const tok of expandedTokens) {
-        if (title.includes(tok)) score += 25;
-        if (item.keywords.some(k => normalize(k) === tok || normalize(k).includes(tok))) score += 20;
-        if (summary.includes(tok)) score += 10;
-        if (steps.includes(tok)) score += 5;
+        if (qTokens.includes(tok)) continue;
+        if (title.includes(tok)) score += 15;
+        if (item.keywords.some(k => normalize(k) === tok || normalize(k).includes(tok))) score += 12;
+        if (summary.includes(tok)) score += 6;
+        if (steps.includes(tok)) score += 2;
       }
 
       return { item, score };
@@ -426,7 +472,7 @@
       isEn ? primary.summaryEn : primary.summaryPt,
       '',
       `**${isEn ? 'Step-by-step instructions:' : 'Passo a passo:'}**`,
-      ...(isEn ? primary.stepsEn : primary.stepsPt).map(s => `• ${s.replace(/^[0-9]+\.\s*/, '')}`),
+      ...(isEn ? primary.stepsEn : primary.stepsPt).map(s => `• ${s.replace(/^([•\-\*]|\d+\.)\s*/, '')}`),
       '',
       primary.tipPt ? `> 💡 *${isEn ? primary.tipEn : primary.tipPt}*` : ''
     ].filter(Boolean).join('\n');
@@ -443,9 +489,11 @@
 
   const SUGGESTIONS = {
     pt: [
+      'Em quais extensões consigo salvar ou exportar?',
       'Como furar ou cortar uma peça?',
       'Como exportar para Bambu Studio ou Cura?',
       'Qual a diferença entre STEP BRep e Facetado?',
+      'Como abrir arquivos STL, STEP e JSON?',
       'Quais são os atalhos de teclado e mouse?',
       'Como criar engrenagens cilíndricas?',
       'Como funciona o mancal para rolamento 608?',
@@ -453,9 +501,11 @@
       'Como funciona a privacidade e o modo offline?'
     ],
     en: [
+      'What file formats can I save or export?',
       'How to drill holes or subtract solids?',
       'How to export for Bambu Studio or Cura?',
       'What is the difference between BRep & Faceted STEP?',
+      'How to open STL, STEP and JSON files?',
       'What are the keyboard & mouse shortcuts?',
       'How to generate spur gears?',
       'How does the 608 bearing housing work?',
