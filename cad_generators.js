@@ -1256,6 +1256,13 @@
         },
       ],
     },
+    t800: {
+      titlePt: "Busto Exterminador T-800",
+      titleEn: "T-800 Terminator Endoskull",
+      file: "assets/t800_endoskull.stl",
+      color: "#38bdf8",
+      items: [],
+    },
     rover: {
       titlePt: "Robô Rover Espacial (Demonstração)",
       titleEn: "Space Rover Assembly (Demo)",
