@@ -10,7 +10,7 @@ function app(){
  w.HTMLAnchorElement.prototype.click=()=>{};
  w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});
  w.HTMLElement.prototype.scrollIntoView=()=>{};
- for(const file of ['libs/three.min.js','libs/three-csg.js','libs/STLLoader.js','cad_mesh.js','cad_generators.js','cad_project.js','cad_assembly.js','cad_sketch_solver.js','ui_text.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context,{filename:file});
+ for(const file of ['libs/three.min.js','libs/three-csg.js','libs/STLLoader.js','cad_mesh.js','cad_generators.js','cad_project.js','cad_assembly.js','cad_sketch_solver.js','ui_text.js','cad_assistant.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context,{filename:file});
  w.THREE.WebGLRenderer=class {constructor(){this.shadowMap={};}setPixelRatio(){}setSize(){}render(){}};
  w.THREE.OrbitControls=class {constructor(){this.target=new w.THREE.Vector3();}update(){}};
  let source=fs.readFileSync(path.join(root,'app.js'),'utf8');

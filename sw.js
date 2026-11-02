@@ -1,6 +1,6 @@
 /* Caches are shared by origin: this worker owns only this prefix and scope. */
 const CACHE_PREFIX = '3dcad-studio-';
-const CACHE_NAME = `${CACHE_PREFIX}v1.3.9`;
+const CACHE_NAME = `${CACHE_PREFIX}v1.4.0`;
 const ASSETS = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const ASSETS = [
   './cad_generators.js',
   './cad_project.js',
   './ui_text.js',
+  './cad_assistant.js',
   './app.js',
   './manifest.json',
   './icon-192.png',

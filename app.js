@@ -2713,6 +2713,7 @@
       if (dict[k]) el.textContent = dict[k];
     });
     applyExtraTranslations();
+    renderAssistantChips();
     renderInspectorFields();
     renderFeatureTree();
     updateTelemetryAndPrintMetrics();
@@ -2751,8 +2752,103 @@
   });
   $('#btnOpen4uModal').onclick = () => openModal($('#modal4uLabs'));
   $('#btnClose4uModal').onclick = () => closeModal($('#modal4uLabs'));
-  $('#btnHelp').onclick = () => openModal($('#helpModal'));
+  $('#btnHelp').onclick = () => { renderAssistantChips(); openModal($('#helpModal')); };
   $('#btnCloseHelp').onclick = () => closeModal($('#helpModal'));
+
+  function formatAssistantMarkdown(md) {
+    if (!md) return '';
+    const lines = md.split('\n');
+    let html = '';
+    let inList = false;
+    function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) {
+        if (inList) { html += '</ul>'; inList = false; }
+        continue;
+      }
+      if (line.startsWith('### ')) {
+        if (inList) { html += '</ul>'; inList = false; }
+        html += `<h3>${esc(line.slice(4))}</h3>`;
+      } else if (line.startsWith('• ') || line.startsWith('- ') || /^[0-9]+\.\s*/.test(line)) {
+        if (!inList) { html += '<ul>'; inList = true; }
+        const content = esc(line.replace(/^[•\-\*]\s*/, '').replace(/^[0-9]+\.\s*/, ''));
+        const bolded = content.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        html += `<li>${bolded}</li>`;
+      } else if (line.startsWith('> ')) {
+        if (inList) { html += '</ul>'; inList = false; }
+        const quote = esc(line.slice(2)).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        html += `<blockquote>${quote}</blockquote>`;
+      } else {
+        if (inList) { html += '</ul>'; inList = false; }
+        const bolded = esc(line).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        html += `<p style="margin:4px 0">${bolded}</p>`;
+      }
+    }
+    if (inList) html += '</ul>';
+    return html;
+  }
+
+  function renderAssistantChips() {
+    const container = $('#assistantChips');
+    if (!container || typeof CadAssistant === 'undefined') return;
+    container.innerHTML = '';
+    const suggestions = (CadAssistant.SUGGESTIONS && CadAssistant.SUGGESTIONS[lang]) || [];
+    suggestions.forEach(text => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'assistant-chip';
+      btn.textContent = text;
+      btn.onclick = () => {
+        const inp = $('#assistantInput');
+        if (inp) inp.value = text;
+        askAssistant(text);
+      };
+      container.appendChild(btn);
+    });
+  }
+
+  async function askAssistant(query) {
+    if (!query || typeof CadAssistant === 'undefined') return;
+    const q = query.trim();
+    if (!q) return;
+    const respWrap = $('#assistantResponseWrap');
+    const respBody = $('#assistantResponseBody');
+    const respTag = $('#assistantResponseTag');
+    const badge = $('#aiStatusBadge');
+    if (respWrap) respWrap.hidden = false;
+    if (respBody) respBody.innerHTML = `<p style="color:var(--text-muted);font-style:italic">${lang === 'en' ? 'Searching local knowledge base...' : 'Pesquisando na base de conhecimento local...'}</p>`;
+
+    try {
+      const res = await CadAssistant.answerQuestion(q, lang);
+      if (respTag) respTag.textContent = res.source === 'gemini_nano'
+        ? (lang === 'en' ? '🤖 Answer (Local Gemini Nano):' : '🤖 Resposta (Gemini Nano Local):')
+        : (lang === 'en' ? '💡 Local AI Answer:' : '💡 Resposta da IA Local:');
+      if (badge && res.source === 'gemini_nano') {
+        badge.className = 'ai-badge gemini';
+        badge.textContent = lang === 'en' ? '● Gemini Nano Active' : '● Gemini Nano Ativo';
+      }
+      if (respBody) {
+        respBody.innerHTML = formatAssistantMarkdown(res.text);
+      }
+    } catch (err) {
+      if (respBody) respBody.innerHTML = `<p style="color:#f87171">${lang === 'en' ? 'Error processing question.' : 'Erro ao processar pergunta.'} ${err.message || ''}</p>`;
+    }
+  }
+
+  const btnAskAi = $('#btnAskAssistant');
+  if (btnAskAi) btnAskAi.onclick = () => askAssistant($('#assistantInput')?.value);
+  const aiInput = $('#assistantInput');
+  if (aiInput) aiInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); askAssistant(aiInput.value); }
+  });
+  const btnClearAi = $('#btnAssistantClear');
+  if (btnClearAi) btnClearAi.onclick = () => {
+    const wrap = $('#assistantResponseWrap');
+    if (wrap) wrap.hidden = true;
+    const inp = $('#assistantInput');
+    if (inp) inp.value = '';
+  };
   const isStandalone=()=>window.matchMedia?.('(display-mode: standalone)').matches||navigator.standalone===true;
   $('#btnInstall').hidden = isStandalone();
   window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;$('#btnInstall').hidden=isStandalone();});

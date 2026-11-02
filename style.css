@@ -1208,6 +1208,159 @@ input, textarea { user-select: text; }
 .help-content { display: grid; gap: 14px; line-height: 1.65; color: var(--text-muted); user-select: text; padding-right: 6px; }
 .help-content h3 { color: var(--text-main); margin-top: 8px; font-size: 15px; font-weight: 600; border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px; }
 .help-content p { margin: 0; font-size: 13.5px; }
+
+/* 🤖 Local AI Assistant in Help Modal */
+.assistant-panel {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0%, rgba(15, 23, 42, 0.75) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.assistant-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.assistant-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+}
+.ai-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.35);
+}
+.ai-badge.gemini {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.35);
+}
+.assistant-input-wrap {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.assistant-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-main);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.assistant-input:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+.assistant-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.assistant-chip {
+  font-size: 11.5px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+.assistant-chip:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: var(--accent-cyan);
+  color: #fff;
+}
+.assistant-response-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.assistant-response-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-orange);
+}
+.assistant-clear-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.assistant-clear-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+.assistant-response-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-main);
+  user-select: text;
+}
+.assistant-response-body h3 {
+  margin: 0 0 6px 0;
+  font-size: 14.5px;
+  color: var(--accent-cyan);
+}
+.assistant-response-body ul {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.assistant-response-body li {
+  margin: 4px 0;
+}
+.assistant-response-body blockquote {
+  margin: 8px 0 0 0;
+  padding: 6px 10px;
+  background: rgba(249, 115, 22, 0.08);
+  border-left: 3px solid var(--accent-orange);
+  border-radius: 4px;
+  font-size: 12.5px;
+  color: #fdba74;
+}
+.help-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.help-section-divider::before,
+.help-section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
 .sketch-topbar { flex-wrap: wrap; padding: 6px; }
 .sketch-properties { flex-shrink: 0; padding: 6px; background: var(--bg-panel); max-height: 160px; overflow: auto; }
 #sketchEntityFields { display: flex; flex-direction: column; gap: 5px; }
