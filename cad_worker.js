@@ -151,7 +151,9 @@ self.onmessage = async function (e) {
         else if (t === "SPHERE") solid = self.CadExactEngine.makeExactSphere(rep, p);
         else if (t === "CONE") solid = self.CadExactEngine.makeExactCone(rep, p);
         else if (t === "TORUS") solid = self.CadExactEngine.makeExactTorus(rep, p);
-        else solid = self.CadExactEngine.makeExactBox(rep, p);
+        else if (t === "EXTRUDE") solid = self.CadExactEngine.makeExactExtrude(rep, shapeData.profiles, p);
+        else if (t === "REVOLVE") solid = self.CadExactEngine.makeExactRevolve(rep, shapeData.profiles, p);
+        else throw new Error(`Operação BRep não suportada para o tipo: ${t}. Válido para Cubo, Cilindro, Esfera, Cone, Torus e Esboços.`);
 
         let finished = null;
         if (operation === "fillet") {
@@ -190,6 +192,17 @@ self.onmessage = async function (e) {
             else if (feat.type === "EXTRUDE") solid = self.CadExactEngine.makeExactExtrude(rep, feat.profiles, feat.params);
             else if (feat.type === "REVOLVE") solid = self.CadExactEngine.makeExactRevolve(rep, feat.profiles, feat.params);
             if (solid) {
+              if (Array.isArray(feat.rot)) {
+                const [rx, ry, rz] = feat.rot;
+                if (rx) solid = solid.rotate(rx, [0, 0, 0], [1, 0, 0]);
+                if (ry) solid = solid.rotate(ry, [0, 0, 0], [0, 1, 0]);
+                if (rz) solid = solid.rotate(rz, [0, 0, 0], [0, 0, 1]);
+              }
+              if (Array.isArray(feat.pos) && (feat.pos[0] || feat.pos[1] || feat.pos[2])) {
+                const t = solid.translate(feat.pos);
+                solid.delete();
+                solid = t;
+              }
               validShapes.push({
                 shape: solid,
                 name: feat.name || `Solid_${i + 1}`,
@@ -197,6 +210,10 @@ self.onmessage = async function (e) {
               });
             }
           } catch {}
+        }
+        if (features.length > 0 && validShapes.length < features.length) {
+          validShapes.forEach(s => s.shape.delete());
+          throw new Error("Algumas peças da cena contêm malhas poligonais e requerem exportação facetada.");
         }
         if (!validShapes.length) {
           historyGraph.setFeatures(payload.features);

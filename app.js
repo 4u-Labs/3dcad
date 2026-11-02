@@ -459,8 +459,9 @@
     return id;
   }
 
+  const MESH_SOLID_TYPES = new Set(["CSG_SOLID", "STL_IMPORT", "MESH", "REVOLVE_SOLID", "LOFT_SOLID", "SWEEP_SOLID", "BREP_SOLID"]);
   function buildSolid(type, customOpts = {}) {
-    const isMesh = ["CSG_SOLID", "STL_IMPORT", "MESH"].includes(type);
+    const isMesh = MESH_SOLID_TYPES.has(type);
     const params = isMesh ? {} : CadProject.validateParams(type, {...(DEFAULT_PARAMS[type] || {}), ...(customOpts.params || {})});
     const record = CadProject.validateItems([{...customOpts, id: customOpts.id || newId(), type, params,
       color: customOpts.color || DEFAULT_COLORS[type] || "#f97316",
@@ -530,7 +531,12 @@
     redoStack = [];
   }
 
-  function restoreSceneFromItems(items) {
+  function currentProjectDocument() {
+    const joints = assemblyManager ? assemblyManager.serialize() : [];
+    return CadProject.document(serializeSceneState(), joints);
+  }
+
+  function restoreSceneFromItems(items, joints = null) {
     const records = CadProject.validateItems(items), staged = [];
     try { let triangles=0;for (const item of records) { const mesh=buildSolid(item.type,item);staged.push(mesh);triangles+=triangleCount(mesh.geometry);if(triangles>CadMesh.MAX_TRIANGLES)throw new Error(L("Projeto excede 1.000.000 triângulos.", "Project exceeds 1,000,000 triangles.")); } }
     catch (error) { staged.forEach(disposeMesh); throw error; }
@@ -541,6 +547,14 @@
     solids.forEach(mesh => scene.add(mesh));
     selectedSolid = null;
     timelineStep = solids.length;
+    if (assemblyManager) {
+      if (Array.isArray(joints)) {
+        try { assemblyManager.deserialize(joints); } catch {}
+      }
+      solids.forEach(s => {
+        if (s.userData.id) assemblyManager.registerBody(s.userData.id, s.userData.name, s);
+      });
+    }
     restoring = false;
     selectSolid(solids.find(mesh => mesh.userData.id === selectedId) || solids.at(-1) || null);
     refreshAllUI();
@@ -798,7 +812,7 @@
 
   function saveAutoSave() {
     if (isBooting || restoring) return;
-    const state = JSON.stringify(CadProject.document(serializeSceneState()));
+    const state = JSON.stringify(currentProjectDocument());
     if (state === savedScene) return;
     const revision = ++saveRevision;
     setSaveStatus("pending"); clearTimeout(saveTimer);
@@ -809,7 +823,7 @@
   }
 
   function renderProjectConsole() {
-    const input = $("#mcpJsonConsole"), doc = CadProject.document(serializeSceneState());
+    const input = $("#mcpJsonConsole"), doc = currentProjectDocument();
     const text = JSON.stringify(doc,null,2), large = text.length > 60000;
     input.dataset.previewOnly = large ? 'true' : 'false';
     input.value = large ? JSON.stringify({format:doc.format,version:doc.version,units:doc.units,preview:true,partCount:doc.solids.length,solids:doc.solids.map(s=>({id:s.id,type:s.type,name:s.name,vertices:s.geometry?.positions.length/3,triangles:s.geometry?(s.geometry.index?.length||s.geometry.positions.length/3)/3:undefined,visible:s.visible}))},null,2) : text;
@@ -1889,7 +1903,7 @@
 
   function exportDocument() {
     flushEdits();
-    downloadBlob(new Blob([JSON.stringify(CadProject.document(serializeSceneState()), null, 2)], {type:'application/json;charset=utf-8'}), 'projeto_3dcad.json');
+    downloadBlob(new Blob([JSON.stringify(currentProjectDocument(), null, 2)], {type:'application/json;charset=utf-8'}), 'projeto_3dcad.json');
   }
   function exportFormat(format) {
     flushEdits();
@@ -1909,9 +1923,12 @@
     showToast(L("Gerando STEP BRep analítico...", "Generating analytic BRep STEP..."));
     try {
       if (Kernel && Kernel.isAvailable) {
-        const features = solids.map((s) => ({
+        const features = solids.map((s, i) => ({
           type: s.userData.type,
+          name: s.userData.name || `Solid_${i + 1}`,
+          color: s.userData.color || "#f97316",
           params: s.userData.params || {},
+          profiles: s.userData.params?.entities && SketchSolver ? SketchSolver.extractProfiles(s.userData.params.entities) : undefined,
           pos: s.position.toArray(),
           rot: [s.rotation.x, s.rotation.y, s.rotation.z].map(THREE.MathUtils.radToDeg),
         }));
@@ -2091,38 +2108,47 @@
     showToast(L("Varredura (Sweep) criada!", "Sweep created!"));
   }
 
+  const BREP_PRIMITIVE_TYPES = new Set(["BOX", "CYLINDER", "SPHERE", "CONE", "TORUS", "EXTRUDE", "SKETCH_EXTRUDE", "REVOLVE"]);
+
   async function applyFilletBRep() {
     if (!selectedSolid) {
       showToast(L("Selecione um sólido para arredondar (Fillet).", "Select a solid to fillet."));
       return;
     }
+    if (!BREP_PRIMITIVE_TYPES.has(selectedSolid.userData.type)) {
+      showToast(L("Arredondamento BRep analítico disponível para Cubo, Cilindro, Esfera, Cone, Torus e Esboços.", "Analytic BRep Fillet available for Box, Cylinder, Sphere, Cone, Torus and Sketches."));
+      return;
+    }
+    if (!Kernel || !Kernel.isAvailable) {
+      showToast(L("Motor analítico BRep (OpenCASCADE) não inicializado.", "Analytic BRep kernel (OpenCASCADE) not initialized."));
+      return;
+    }
     pushUndoSnapshot();
     try {
-      if (Kernel && Kernel.isAvailable) {
-        showToast(L("Aplicando Fillet BRep analítico...", "Applying analytic BRep Fillet..."));
-        const meshData = await Kernel.applyEdgeFinish("fillet", { radius: 2 }, {
-          type: selectedSolid.userData.type,
-          params: selectedSolid.userData.params || {}
-        });
-        if (meshData) {
-          const threeData = Kernel.toThreeGeometry(meshData);
-          selectedSolid.geometry.dispose();
-          selectedSolid.geometry = threeData.geometry;
-          attachCadEdges(selectedSolid);
-          applyVisualStyleToMesh(selectedSolid);
-          selectedSolid.userData.isParametric = false;
-          selectedSolid.userData.type = "BREP_SOLID";
-          updateTelemetryAndPrintMetrics();
-          refreshAllUI();
-          showToast(L("Arredondamento (Fillet 2mm) BRep aplicado com sucesso!", "Analytic BRep Fillet (2mm) applied successfully!"));
-          return;
-        }
+      showToast(L("Aplicando Fillet BRep analítico...", "Applying analytic BRep Fillet..."));
+      const meshData = await Kernel.applyEdgeFinish("fillet", { radius: 2 }, {
+        type: selectedSolid.userData.type,
+        params: selectedSolid.userData.params || {}
+      });
+      if (meshData && meshData.positions && meshData.positions.length) {
+        const threeData = Kernel.toThreeGeometry(meshData);
+        selectedSolid.geometry.dispose();
+        selectedSolid.geometry = threeData.geometry;
+        attachCadEdges(selectedSolid);
+        applyVisualStyleToMesh(selectedSolid);
+        selectedSolid.userData.isParametric = false;
+        selectedSolid.userData.type = "BREP_SOLID";
+        updateTelemetryAndPrintMetrics();
+        refreshAllUI();
+        showToast(L("Arredondamento (Fillet 2mm) BRep aplicado com sucesso!", "Analytic BRep Fillet (2mm) applied successfully!"));
+        return;
+      } else {
+        throw new Error(L("Geometria resultante inválida", "Invalid resulting geometry"));
       }
     } catch (err) {
       console.warn("Fillet error:", err);
+      showToast(L("Falha no arredondamento: " + (err.message || "Erro geométrico"), "Fillet failed: " + (err.message || "Geometry error")));
     }
-    showToast(L("Arredondamento (Fillet 2mm) aplicado às arestas!", "Fillet (2mm) applied to edges!"));
-    refreshAllUI();
   }
 
   async function applyChamferBRep() {
@@ -2130,33 +2156,40 @@
       showToast(L("Selecione um sólido para chanfrar (Chamfer).", "Select a solid to chanfer."));
       return;
     }
+    if (!BREP_PRIMITIVE_TYPES.has(selectedSolid.userData.type)) {
+      showToast(L("Chanfro BRep analítico disponível para Cubo, Cilindro, Esfera, Cone, Torus e Esboços.", "Analytic BRep Chamfer available for Box, Cylinder, Sphere, Cone, Torus and Sketches."));
+      return;
+    }
+    if (!Kernel || !Kernel.isAvailable) {
+      showToast(L("Motor analítico BRep (OpenCASCADE) não inicializado.", "Analytic BRep kernel (OpenCASCADE) not initialized."));
+      return;
+    }
     pushUndoSnapshot();
     try {
-      if (Kernel && Kernel.isAvailable) {
-        showToast(L("Aplicando Chamfer BRep analítico...", "Applying analytic BRep Chamfer..."));
-        const meshData = await Kernel.applyEdgeFinish("chamfer", { distance: 1.5 }, {
-          type: selectedSolid.userData.type,
-          params: selectedSolid.userData.params || {}
-        });
-        if (meshData) {
-          const threeData = Kernel.toThreeGeometry(meshData);
-          selectedSolid.geometry.dispose();
-          selectedSolid.geometry = threeData.geometry;
-          attachCadEdges(selectedSolid);
-          applyVisualStyleToMesh(selectedSolid);
-          selectedSolid.userData.isParametric = false;
-          selectedSolid.userData.type = "BREP_SOLID";
-          updateTelemetryAndPrintMetrics();
-          refreshAllUI();
-          showToast(L("Chanfro (Chamfer 1.5mm) BRep aplicado com sucesso!", "Analytic BRep Chamfer (1.5mm) applied successfully!"));
-          return;
-        }
+      showToast(L("Aplicando Chamfer BRep analítico...", "Applying analytic BRep Chamfer..."));
+      const meshData = await Kernel.applyEdgeFinish("chamfer", { distance: 1.5 }, {
+        type: selectedSolid.userData.type,
+        params: selectedSolid.userData.params || {}
+      });
+      if (meshData && meshData.positions && meshData.positions.length) {
+        const threeData = Kernel.toThreeGeometry(meshData);
+        selectedSolid.geometry.dispose();
+        selectedSolid.geometry = threeData.geometry;
+        attachCadEdges(selectedSolid);
+        applyVisualStyleToMesh(selectedSolid);
+        selectedSolid.userData.isParametric = false;
+        selectedSolid.userData.type = "BREP_SOLID";
+        updateTelemetryAndPrintMetrics();
+        refreshAllUI();
+        showToast(L("Chanfro (Chamfer 1.5mm) BRep aplicado com sucesso!", "Analytic BRep Chamfer (1.5mm) applied successfully!"));
+        return;
+      } else {
+        throw new Error(L("Geometria resultante inválida", "Invalid resulting geometry"));
       }
     } catch (err) {
       console.warn("Chamfer error:", err);
+      showToast(L("Falha no chanfro: " + (err.message || "Erro geométrico"), "Chamfer failed: " + (err.message || "Geometry error")));
     }
-    showToast(L("Chanfro (Chamfer 1.5mm) aplicado às arestas!", "Chamfer (1.5mm) applied to edges!"));
-    refreshAllUI();
   }
 
   async function applyShellBRep() {
@@ -2164,33 +2197,40 @@
       showToast(L("Selecione um sólido para criar casca oca (Shell).", "Select a solid to shell."));
       return;
     }
+    if (!BREP_PRIMITIVE_TYPES.has(selectedSolid.userData.type)) {
+      showToast(L("Casca oca BRep analítica disponível para Cubo, Cilindro, Esfera, Cone, Torus e Esboços.", "Analytic BRep Shell available for Box, Cylinder, Sphere, Cone, Torus and Sketches."));
+      return;
+    }
+    if (!Kernel || !Kernel.isAvailable) {
+      showToast(L("Motor analítico BRep (OpenCASCADE) não inicializado.", "Analytic BRep kernel (OpenCASCADE) not initialized."));
+      return;
+    }
     pushUndoSnapshot();
     try {
-      if (Kernel && Kernel.isAvailable) {
-        showToast(L("Aplicando Shell BRep analítico...", "Applying analytic BRep Shell..."));
-        const meshData = await Kernel.applyEdgeFinish("shell", { thickness: 2 }, {
-          type: selectedSolid.userData.type,
-          params: selectedSolid.userData.params || {}
-        });
-        if (meshData) {
-          const threeData = Kernel.toThreeGeometry(meshData);
-          selectedSolid.geometry.dispose();
-          selectedSolid.geometry = threeData.geometry;
-          attachCadEdges(selectedSolid);
-          applyVisualStyleToMesh(selectedSolid);
-          selectedSolid.userData.isParametric = false;
-          selectedSolid.userData.type = "BREP_SOLID";
-          updateTelemetryAndPrintMetrics();
-          refreshAllUI();
-          showToast(L("Casca oca (Shell 2mm) BRep criada com sucesso!", "Analytic BRep Shell (2mm) created successfully!"));
-          return;
-        }
+      showToast(L("Aplicando Shell BRep analítico...", "Applying analytic BRep Shell..."));
+      const meshData = await Kernel.applyEdgeFinish("shell", { thickness: 2 }, {
+        type: selectedSolid.userData.type,
+        params: selectedSolid.userData.params || {}
+      });
+      if (meshData && meshData.positions && meshData.positions.length) {
+        const threeData = Kernel.toThreeGeometry(meshData);
+        selectedSolid.geometry.dispose();
+        selectedSolid.geometry = threeData.geometry;
+        attachCadEdges(selectedSolid);
+        applyVisualStyleToMesh(selectedSolid);
+        selectedSolid.userData.isParametric = false;
+        selectedSolid.userData.type = "BREP_SOLID";
+        updateTelemetryAndPrintMetrics();
+        refreshAllUI();
+        showToast(L("Casca oca (Shell 2mm) BRep criada com sucesso!", "Analytic BRep Shell (2mm) created successfully!"));
+        return;
+      } else {
+        throw new Error(L("Geometria resultante inválida", "Invalid resulting geometry"));
       }
     } catch (err) {
       console.warn("Shell error:", err);
+      showToast(L("Falha na casca oca: " + (err.message || "Erro geométrico"), "Shell failed: " + (err.message || "Geometry error")));
     }
-    showToast(L("Casca oca (Shell 2mm) criada!", "Hollow shell (2mm) created!"));
-    refreshAllUI();
   }
 
   function toggleAssemblyAnimation() {
@@ -2378,7 +2418,7 @@
     if (/\.json$/i.test(file.name)) {
       const doc = CadProject.read(await file.text());
       // Restore stages every object before committing. Invalid input leaves the scene intact.
-      pushUndoSnapshot(); restoreSceneFromItems(doc.solids);
+      pushUndoSnapshot(); restoreSceneFromItems(doc.solids, doc.joints);
     } else if (/\.stl$/i.test(file.name)) {
       const bytes = await file.arrayBuffer();
       const mesh = parseSTLToMesh(bytes, file.name);
@@ -2413,7 +2453,42 @@
       zoomFitScene();
       showToast(L(`3MF importado com sucesso: ${added} peça(s).`, `3MF imported successfully: ${added} part(s).`));
       return;
-    } else throw new Error(L('Escolha um arquivo 3MF, STL ou JSON.', 'Choose a 3MF, STL or JSON file.'));
+    } else if (/\.(step|stp)$/i.test(file.name)) {
+      const bytes = await file.arrayBuffer();
+      if (bytes.byteLength < 20) throw new Error(L('Arquivo STEP vazio ou inválido.', 'Empty or invalid STEP file.'));
+      showToast(L('Processando geometria STEP BRep...', 'Processing STEP BRep geometry...'));
+      if (!Kernel || !Kernel.isAvailable) {
+        throw new Error(L('Motor OpenCASCADE não inicializado.', 'OpenCASCADE kernel not initialized.'));
+      }
+      const meshData = await Kernel.importSTEP(bytes);
+      if (!meshData || !meshData.positions || !meshData.positions.length) {
+        throw new Error(L('Falha ao interpretar arquivo STEP.', 'Failed to parse STEP file.'));
+      }
+      const threeData = Kernel.toThreeGeometry(meshData);
+      const record = {
+        type: 'BREP_SOLID',
+        name: file.name.replace(/\.(step|stp)$/i, '').slice(0, 160),
+        color: '#38bdf8',
+        params: {},
+        pos: [0, 0, 0],
+        geometry: {
+          positions: Array.from(threeData.geometry.attributes.position.array),
+          index: threeData.geometry.index ? Array.from(threeData.geometry.index.array) : null
+        }
+      };
+      const mesh = buildSolid(record.type, record);
+      if (solids.length >= CadProject.MAX_SOLIDS) throw new Error(L('Limite de peças atingido.', 'Part limit reached.'));
+      ensureCapacity(mesh.geometry);
+      pushUndoSnapshot();
+      scene.add(mesh);
+      solids.push(mesh);
+      timelineStep = solids.length;
+      selectSolid(mesh);
+      refreshAllUI();
+      zoomFitScene();
+      showToast(L('Arquivo STEP importado com sucesso!', 'STEP file imported successfully!'));
+      return;
+    } else throw new Error(L('Escolha um arquivo STEP, 3MF, STL ou JSON.', 'Choose a STEP, 3MF, STL or JSON file.'));
     zoomFitScene(); showToast(L('Projeto importado. Posições preservadas.', 'Project imported. Positions preserved.'));
   }
   ['#fileImportInput', '#fileImportInputSide', '#fileImportInputRibbon'].forEach(sel => {
@@ -2486,11 +2561,11 @@
   $('#btnRefreshMcpJson').onclick = renderProjectConsole;
   $('#mcpJsonConsole').addEventListener('input',()=>{ $('#mcpJsonConsole').dataset.previewOnly='false';$('#btnApplyMcpJson').disabled=false; });
   $('#btnCopyMcp').onclick = async () => {
-    try { if (!navigator.clipboard) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText($('#mcpJsonConsole').dataset.previewOnly==='true'?JSON.stringify(CadProject.document(serializeSceneState()),null,2):$('#mcpJsonConsole').value); showToast(L('JSON copiado.', 'JSON copied.')); }
+    try { if (!navigator.clipboard) throw new Error('Clipboard unavailable'); await navigator.clipboard.writeText($('#mcpJsonConsole').dataset.previewOnly==='true'?JSON.stringify(currentProjectDocument(),null,2):$('#mcpJsonConsole').value); showToast(L('JSON copiado.', 'JSON copied.')); }
     catch { showToast(L('Selecione o JSON e use Ctrl+C.', 'Select the JSON and use Ctrl+C.')); }
   };
   $('#btnRecoverProject').onclick = async () => {
-    try { const backup = await projectStore.load(true); if (!backup) throw new Error(L('Nenhuma cópia anterior disponível.', 'No previous copy available.')); flushEdits(); pushUndoSnapshot(); restoreSceneFromItems(backup.solids); zoomFitScene(); showToast(L('Cópia anterior recuperada. Desfazer restaura a cena atual.', 'Previous copy recovered. Undo restores the current scene.')); }
+    try { const backup = await projectStore.load(true); if (!backup) throw new Error(L('Nenhuma cópia anterior disponível.', 'No previous copy available.')); flushEdits(); pushUndoSnapshot(); restoreSceneFromItems(backup.solids, backup.joints); zoomFitScene(); showToast(L('Cópia anterior recuperada. Desfazer restaura a cena atual.', 'Previous copy recovered. Undo restores the current scene.')); }
     catch (error) { showToast(error.message); }
   };
 
@@ -2701,7 +2776,7 @@
   });
   window.addEventListener('pagehide',()=>{
     flushEdits(); clearTimeout(saveTimer);
-    if(!isBooting&&savedScene!=='load-error')projectStore.save(CadProject.document(serializeSceneState())).catch(()=>{});
+    if(!isBooting&&savedScene!=='load-error')projectStore.save(currentProjectDocument()).catch(()=>{});
   });
   window.addEventListener('beforeunload',event=>{
     if($('#autoSaveBadge').dataset.state==='pending'||$('#autoSaveBadge').dataset.state==='error'){event.preventDefault();event.returnValue='';}
@@ -2735,12 +2810,11 @@
     if (Kernel) { Kernel.init().catch(() => {}); }
     try {
       const saved = await projectStore.load();
-      const isOldJcb = saved && saved.solids && saved.solids.some(s => {
-        const n = (s.name || "") + " " + (s.id || "");
-        return /jcb|Chassi_Trator|Capo_Motor|Cacamba_Traseira/i.test(n);
-      });
+      const isOldJcb = saved && Array.isArray(saved.solids) && saved.solids.length === 28 &&
+        saved.solids[0]?.name === "Chassi_Trator_JCB" &&
+        saved.solids[1]?.name === "Capo_Motor_JCB";
       if (saved && !isOldJcb) {
-        restoreSceneFromItems(saved.solids);
+        restoreSceneFromItems(saved.solids, saved.joints);
       } else {
         await loadDemoProject("gearbox");
       }
@@ -2748,7 +2822,7 @@
       savedScene = "load-error";
       try {
         const backup = await projectStore.load(true);
-        if (backup) { savedScene = ""; restoreSceneFromItems(backup.solids); showToast(L("Projeto recuperado da cópia anterior.", "Project recovered from the previous copy.")); }
+        if (backup) { savedScene = ""; restoreSceneFromItems(backup.solids, backup.joints); showToast(L("Projeto recuperado da cópia anterior.", "Project recovered from the previous copy.")); }
         else showToast(L("Falha ao abrir projeto. O arquivo anterior foi preservado; use Recuperar.", "Unable to open project. Previous data was preserved; use Recover."));
       } catch { showToast(L("Falha na recuperação. Importe uma cópia JSON.", "Recovery failed. Import a JSON backup.")); }
     }

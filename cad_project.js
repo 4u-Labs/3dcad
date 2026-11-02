@@ -74,7 +74,7 @@
       return result;
     });
   }
-  function document(items){return {format:FORMAT,version:VERSION,units:'mm',coordinates:'three-y-up',solids:items};}
+  function document(items, joints = []){return {format:FORMAT,version:VERSION,units:'mm',coordinates:'three-y-up',solids:items,joints:Array.isArray(joints)?joints:[]};}
   function read(value){
     if(typeof value==='string'){
       if(value.length>MAX_BYTES)fail("Arquivo excede 32 MB", "File exceeds 32 MB");
@@ -83,7 +83,7 @@
     // Legacy v1 stored an array and used a proprietary protocol label.
     if(Array.isArray(value))return document(validateItems(value));
     if(!value||typeof value!=='object'||value.preview===true||(value.format!==undefined&&value.format!==FORMAT)||(value.version!==undefined&&value.version!==VERSION)||(value.units!==undefined&&value.units!=='mm')||(value.coordinates!==undefined&&value.coordinates!=='three-y-up')||(value.protocol!==undefined&&value.protocol!=='3dcad-mcp/1.0'))fail("Formato, versão ou unidades incompatíveis", "Incompatible format, version or units");
-    return document(validateItems(value.solids));
+    return document(validateItems(value.solids), Array.isArray(value.joints)?value.joints:[]);
   }
   function serialize(mesh){
     const d=mesh.userData;
