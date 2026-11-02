@@ -84,3 +84,23 @@ test('MCP exports real positioned meshes to STEP and STL',async()=>{
     assert.deepEqual(max,[115,-40,40]);
   }finally{fs.rmSync(dir,{recursive:true,force:true});await tools.cad_clear_scene.handler({});}
 });
+
+test('imported STEP meshes (STEP_MESH) build, survive undo/redo and reopen',t=>{
+  const f=app();t.after(f.close);
+  const {A}=f;
+  // Closed unit-cube mesh, as produced by Kernel.importSTEP + toThreeGeometry.
+  const positions=[0,0,0,10,0,0,10,10,0,0,10,0,0,0,10,10,0,10,10,10,10,0,10,10];
+  const index=[0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7];
+  const record={id:'step1',type:'STEP_MESH',name:'peca_step',color:'#38bdf8',params:{},pos:[0,0,0],geometry:{positions,index}};
+  A.clearAllSolids();
+  A.pushUndoSnapshot();
+  A.restoreSceneFromItems([record]);
+  assert.equal(A.serializeSceneState().filter(s=>s.type==='STEP_MESH').length,1);
+  A.undo();
+  assert.equal(A.serializeSceneState().filter(s=>s.type==='STEP_MESH').length,0);
+  A.redo();
+  const saved=A.serializeSceneState();
+  assert.equal(saved.filter(s=>s.type==='STEP_MESH').length,1);
+  A.restoreSceneFromItems(JSON.parse(JSON.stringify(saved)));
+  assert.equal(A.serializeSceneState()[0].name,'peca_step');
+});

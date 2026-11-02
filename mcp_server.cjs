@@ -38,7 +38,7 @@ function meshesForExport() {
 
 const server = new McpServer({
   name: "3dcad-studio",
-  version: "1.3.7",
+  version: "1.3.9",
   description: "Parametric 3D CAD & BRep Modeling Server for 3DCad Studio",
 });
 

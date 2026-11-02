@@ -5,7 +5,7 @@
 
 ---
 
-## 1. 📐 Visão Geral & Arquitetura Atual (v1.3.8)
+## 1. 📐 Visão Geral & Arquitetura Atual (v1.3.9)
 
 O **3DCad Studio** é um estúdio de modelagem 3D paramétrica e bancada para impressão 3D direto no navegador, 100% local, privado e sem login. Ele opera com uma arquitetura **Dual CAD**:
 1. **Núcleo B-Rep Analítico (OpenCASCADE WebAssembly):** Operações exatas de engenharia executadas em Web Worker dedicado (`cad_worker.js` / `cad_kernel.js` / `cad_exact_engine.js`) para evitar travamento da interface. Suporta primitivas analíticas, extrusão, revolução 360°, loft, varredura (*sweep*), acabamentos de aresta (*Fillet* e *Chamfer*) e casca oca (*Shell*), além de intercâmbio STEP analítico (ISO-10303-21).
@@ -40,7 +40,7 @@ Antes de qualquer commit ou deploy, a suíte de testes deve passar com **zero fa
 # 1. Validar sintaxe de todos os módulos JavaScript
 npm run check
 
-# 2. Executar toda a suíte de testes automatizados (atualmente 59 testes)
+# 2. Executar toda a suíte de testes automatizados (atualmente 60 testes)
 npm test
 
 # 3. Testar servidor MCP
@@ -79,4 +79,4 @@ npm run mcp
 1. **Privacidade e Processamento no Cliente:** Nunca envie malhas, coordenadas ou geometrias para APIs de nuvem externas. Todo o cálculo matemático e gráfico deve ocorrer na máquina do usuário via WebAssembly/GPU.
 2. **Bilinguismo Completo (PT/EN):** Qualquer novo botão, rótulo, dica ou mensagem de erro deve ter tradução correspondente tanto no objeto `pt` quanto no objeto `en` de `ui_text.js` ou `app.js`.
 3. **Redutor de Engrenagens como Projeto Padrão:** O exemplo padrão ao iniciar o aplicativo é o **Redutor de Engrenagens** (`gearbox`). O modelo JCB 3CX foi removido do início. O T-800 Endoskull está disponível como modelo de alta capacidade em STL.
-4. **Cache & Service Worker:** Ao alterar qualquer arquivo do app, atualize a versão em `package.json` e a constante `CACHE_NAME` em `sw.js` (ex.: `v1.3.8`) para que os usuários recebam os novos arquivos imediatamente.
+4. **Cache & Service Worker:** Ao alterar qualquer arquivo do app, atualize a versão em `package.json` e a constante `CACHE_NAME` em `sw.js` (ex.: `v1.3.9`) para que os usuários recebam os novos arquivos imediatamente.

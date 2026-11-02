@@ -459,7 +459,8 @@
     return id;
   }
 
-  const MESH_SOLID_TYPES = new Set(["CSG_SOLID", "STL_IMPORT", "MESH", "REVOLVE_SOLID", "LOFT_SOLID", "SWEEP_SOLID", "BREP_SOLID"]);
+  // Keep in sync with CadProject MESH_TYPES: every stored-mesh type must bypass parameter schemas.
+  const MESH_SOLID_TYPES = new Set(["CSG_SOLID", "STL_IMPORT", "STEP_MESH", "MESH", "REVOLVE_SOLID", "LOFT_SOLID", "SWEEP_SOLID", "BREP_SOLID"]);
   function buildSolid(type, customOpts = {}) {
     const isMesh = MESH_SOLID_TYPES.has(type);
     const params = isMesh ? {} : CadProject.validateParams(type, {...(DEFAULT_PARAMS[type] || {}), ...(customOpts.params || {})});
@@ -2170,6 +2171,7 @@
       showToast(L("Motor analítico BRep (OpenCASCADE) não inicializado.", "Analytic BRep kernel (OpenCASCADE) not initialized."));
       return;
     }
+    const undoDepth = undoStack.length;
     pushUndoSnapshot();
     try {
       showToast(L("Aplicando Fillet BRep analítico...", "Applying analytic BRep Fillet..."));
@@ -2183,6 +2185,7 @@
         throw new Error(L("Geometria resultante inválida", "Invalid resulting geometry"));
       }
     } catch (err) {
+      if (undoStack.length > undoDepth) undoStack.pop(); // nothing changed: drop the no-op undo step
       console.warn("Fillet error:", err);
       showToast(L("Falha no arredondamento: " + (err.message || "Erro geométrico"), "Fillet failed: " + (err.message || "Geometry error")));
     }
@@ -2190,7 +2193,7 @@
 
   async function applyChamferBRep() {
     if (!selectedSolid) {
-      showToast(L("Selecione um sólido para chanfrar (Chamfer).", "Select a solid to chanfer."));
+      showToast(L("Selecione um sólido para chanfrar (Chamfer).", "Select a solid to chamfer."));
       return;
     }
     if (!BREP_PRIMITIVE_TYPES.has(selectedSolid.userData.type)) {
@@ -2201,6 +2204,7 @@
       showToast(L("Motor analítico BRep (OpenCASCADE) não inicializado.", "Analytic BRep kernel (OpenCASCADE) not initialized."));
       return;
     }
+    const undoDepth = undoStack.length;
     pushUndoSnapshot();
     try {
       showToast(L("Aplicando Chamfer BRep analítico...", "Applying analytic BRep Chamfer..."));
@@ -2214,6 +2218,7 @@
         throw new Error(L("Geometria resultante inválida", "Invalid resulting geometry"));
       }
     } catch (err) {
+      if (undoStack.length > undoDepth) undoStack.pop(); // nothing changed: drop the no-op undo step
       console.warn("Chamfer error:", err);
       showToast(L("Falha no chanfro: " + (err.message || "Erro geométrico"), "Chamfer failed: " + (err.message || "Geometry error")));
     }
@@ -2232,6 +2237,7 @@
       showToast(L("Motor analítico BRep (OpenCASCADE) não inicializado.", "Analytic BRep kernel (OpenCASCADE) not initialized."));
       return;
     }
+    const undoDepth = undoStack.length;
     pushUndoSnapshot();
     try {
       showToast(L("Aplicando Shell BRep analítico...", "Applying analytic BRep Shell..."));
@@ -2245,6 +2251,7 @@
         throw new Error(L("Geometria resultante inválida", "Invalid resulting geometry"));
       }
     } catch (err) {
+      if (undoStack.length > undoDepth) undoStack.pop(); // nothing changed: drop the no-op undo step
       console.warn("Shell error:", err);
       showToast(L("Falha na casca oca: " + (err.message || "Erro geométrico"), "Shell failed: " + (err.message || "Geometry error")));
     }

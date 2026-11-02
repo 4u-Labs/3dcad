@@ -1,4 +1,4 @@
-# 3DCad Studio 1.3.7 — BRep analítico e modelagem por malhas
+# 3DCad Studio 1.3.9 — BRep analítico e modelagem por malhas
 
 [Português](#português) · [English](#english) · [Abrir / Open](https://4u.ia.br/app/3dcad/)
 
