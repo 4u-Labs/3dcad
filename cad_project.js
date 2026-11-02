@@ -2,7 +2,7 @@
 (function(root){
   "use strict";
   const FORMAT="3dcad-project", VERSION=2, MAX_BYTES=32*1024*1024, MAX_IMPORT_BYTES=150*1024*1024, MAX_SOLIDS=150;
-  const MESH_TYPES=new Set(["CSG_SOLID","STL_IMPORT","MESH","REVOLVE_SOLID","LOFT_SOLID","SWEEP_SOLID","BREP_SOLID"]);
+  const MESH_TYPES=new Set(["CSG_SOLID","STL_IMPORT","STEP_MESH","MESH","REVOLVE_SOLID","LOFT_SOLID","SWEEP_SOLID","BREP_SOLID"]);
   const fail=(pt,en)=>{throw new Error(`${pt} / ${en}`);};
   const copy=value=>JSON.parse(JSON.stringify(value));
   function finite(n,min=-100000,max=100000){return typeof n==="number"&&Number.isFinite(n)&&n>=min&&n<=max;}
@@ -15,11 +15,11 @@
     const schema=root.CadGenerators.PARAM_SCHEMA[type];
     if(!schema)fail(`Tipo desconhecido: ${type}`,`Unknown type: ${type}`);
     if(!params||typeof params!=="object"||Array.isArray(params))fail("Parâmetros inválidos", "Invalid parameters");
-    const allowed=new Set(schema.map(f=>f.key));if(type==="SKETCH_EXTRUDE")allowed.add("entities");
+    const allowed=new Set(schema.map(f=>f.key));if(type==="SKETCH_EXTRUDE"){allowed.add("entities");allowed.add("constraints");}
     const result={};
     for(const [k,v] of Object.entries(params)){
       if(!allowed.has(k))fail(`Parâmetro desconhecido: ${k}`,`Unknown parameter: ${k}`);
-      if(k==="entities")continue;
+      if(k==="entities"||k==="constraints")continue;
       const f=schema.find(f=>f.key===k);
       if(!finite(v,f.min,f.max)||(["teeth","segments","gusset","nutBore","ventSlots"].includes(k)&&!Number.isInteger(v)))
         fail(`Valor inválido: ${k} (${f.min}–${f.max})`,`Invalid value: ${k} (${f.min}–${f.max})`);
@@ -36,6 +36,7 @@
       result.entities=entities.map(e=>{
         if(!e||!['rect','circle','slot','polygon'].includes(e.kind)||!finite(e.x,-2000,2000)||!finite(e.y,-2000,2000))fail("Entidade de esboço inválida", "Invalid sketch entity");
         const next={kind:e.kind,x:e.x,y:e.y,isHole:e.isHole===true};
+        if(e.id!==undefined){if(typeof e.id!=="string"||!(/^[a-zA-Z0-9_-]{1,80}$/).test(e.id))fail("ID de esboço inválido","Invalid sketch ID");next.id=e.id;}
         if(next.isHole&&e.kind!=="circle")fail("Somente furos circulares são aceitos", "Only circular holes are supported");
         if(['circle','polygon'].includes(e.kind)){
           if(!finite(e.r,0.5,1000))fail("Raio inválido", "Invalid radius");next.r=e.r;
@@ -46,6 +47,24 @@
         return next;
       });
       if(!result.entities.some(e=>!e.isHole))fail("Esboço sem contorno externo", "Sketch has no outer profile");
+      const constraints=params.constraints||[];
+      if(!Array.isArray(constraints)||constraints.length>200)fail("Restrições de esboço inválidas","Invalid sketch constraints");
+      const allowedTypes=new Set(["fixed","coincident","horizontal","vertical","parallel","perpendicular","equal","tangent","concentric","midpoint","symmetric","distance","distanceX","distanceY","radius","diameter","angle"]);
+      const ids=new Set(result.entities.map(e=>e.id).filter(Boolean));
+      result.constraints=constraints.map(c=>{
+        if(!c||!allowedTypes.has(c.type))fail("Restrição de esboço inválida","Invalid sketch constraint");
+        const next={type:c.type};
+        if(c.id!==undefined){if(typeof c.id!=="string"||c.id.length>80)fail("ID de restrição inválido","Invalid constraint ID");next.id=c.id;}
+        for(const key of ["entity","entity1","entity2","line","line1","line2","circle","circle1","circle2","p1","p2","point","arc","axis"]){
+          if(c[key]===undefined)continue;
+          if(typeof c[key]!=="string"||c[key].length>80||(!ids.has(c[key])&&!(key==="axis"&&["X","Y"].includes(c[key]))))fail("Referência de restrição inválida","Invalid constraint reference");
+          next[key]=c[key];
+        }
+        for(const key of ["value","angle","x","y"]){if(c[key]===undefined)continue;if(!finite(c[key],-2000,2000))fail("Valor de restrição inválido","Invalid constraint value");next[key]=c[key];}
+        if(c.internal!==undefined)next.internal=c.internal===true;
+        if(c.signed!==undefined)next.signed=c.signed===true;
+        return next;
+      });
     }
     return result;
   }
@@ -74,7 +93,34 @@
       return result;
     });
   }
-  function document(items, joints = []){return {format:FORMAT,version:VERSION,units:'mm',coordinates:'three-y-up',solids:items,joints:Array.isArray(joints)?joints:[]};}
+  function validateBases(value,items){
+    if(value===undefined)return {};
+    if(!value||typeof value!=="object"||Array.isArray(value))fail("Bases de montagem inválidas","Invalid assembly bases");
+    const ids=new Set(items.map(item=>item.id)), result={};
+    for(const [id,base] of Object.entries(value)){
+      if(!ids.has(id)||!base||!Array.isArray(base.quaternion)||base.quaternion.length!==4||!base.quaternion.every(n=>finite(n,-1,1)))fail("Base de montagem inválida","Invalid assembly base");
+      result[id]={pos:vector(base.pos,[0,0,0]),quaternion:base.quaternion.slice(),scale:vector(base.scale,[1,1,1],-100,100)};
+    }
+    return result;
+  }
+  function validateJoints(value,items){
+    if(value===undefined)return [];
+    if(!Array.isArray(value)||value.length>150)fail("Juntas inválidas","Invalid joints");
+    const ids=new Set(items.map(item=>item.id)), used=new Set();
+    return value.map((joint,i)=>{
+      if(!joint||typeof joint!=="object"||!["fixed","revolute","slider","ball"].includes(joint.type)||!ids.has(joint.bodyA)||!ids.has(joint.bodyB)||joint.bodyA===joint.bodyB)fail("Junta inválida","Invalid joint");
+      const id=joint.id||`joint_${i+1}`;
+      if(typeof id!=="string"||!(/^[a-zA-Z0-9_-]{1,80}$/).test(id)||used.has(id))fail("ID de junta inválido","Invalid joint ID");
+      used.add(id);
+      const name=joint.name||"Joint";
+      if(typeof name!=="string"||name.length>160||/[\u0000-\u001f\u007f]/.test(name))fail("Nome de junta inválido","Invalid joint name");
+      const min=joint.limits?.min??(joint.type==="revolute"?-180:0),max=joint.limits?.max??(joint.type==="revolute"?180:50);
+      if(!finite(min,-100000,100000)||!finite(max,-100000,100000)||min>max||!finite(joint.value??0,-100000,100000))fail("Limites de junta inválidos","Invalid joint limits");
+      const enabled=joint.limits?.enabled!==false;
+      return {id,name,type:joint.type,bodyA:joint.bodyA,bodyB:joint.bodyB,anchor:vector(joint.anchor,[0,0,0]),axis:vector(joint.axis,[0,0,1]),limits:{min,max,enabled},value:enabled?Math.max(min,Math.min(max,joint.value??0)):(joint.value??0)};
+    });
+  }
+  function document(items, joints = [], assemblyBases = {}){return {format:FORMAT,version:VERSION,units:'mm',coordinates:'three-y-up',solids:items,joints:Array.isArray(joints)?joints:[],assemblyBases};}
   function read(value){
     if(typeof value==='string'){
       if(value.length>MAX_BYTES)fail("Arquivo excede 32 MB", "File exceeds 32 MB");
@@ -83,7 +129,8 @@
     // Legacy v1 stored an array and used a proprietary protocol label.
     if(Array.isArray(value))return document(validateItems(value));
     if(!value||typeof value!=='object'||value.preview===true||(value.format!==undefined&&value.format!==FORMAT)||(value.version!==undefined&&value.version!==VERSION)||(value.units!==undefined&&value.units!=='mm')||(value.coordinates!==undefined&&value.coordinates!=='three-y-up')||(value.protocol!==undefined&&value.protocol!=='3dcad-mcp/1.0'))fail("Formato, versão ou unidades incompatíveis", "Incompatible format, version or units");
-    return document(validateItems(value.solids), Array.isArray(value.joints)?value.joints:[]);
+    const items=validateItems(value.solids);
+    return document(items,validateJoints(value.joints,items),validateBases(value.assemblyBases,items));
   }
   function serialize(mesh){
     const d=mesh.userData;

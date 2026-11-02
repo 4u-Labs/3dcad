@@ -39,6 +39,7 @@ test("MCP Server: tool execution creates solids and computes sketch constraints"
   });
   assert.ok(boxRes.content[0].text.includes("Base_Plate"));
   assert.equal(mcp.activeSolids.length, 1);
+  await createHandler({type:"BOX",name:"Top_Cover",params:{width:30,depth:20,height:5}});
 
   // Solve Sketch
   const solveHandler = tools.cad_solve_sketch.handler;
@@ -59,8 +60,8 @@ test("MCP Server: tool execution creates solids and computes sketch constraints"
   const jointRes = await jointHandler({
     name: "Hinge_J1",
     type: "revolute",
-    bodyA: "Base_Plate",
-    bodyB: "Top_Cover",
+    bodyA: mcp.activeSolids[0].id,
+    bodyB: mcp.activeSolids[1].id,
     axis: [0, 0, 1],
     limits: { min: 0, max: 120 },
   });

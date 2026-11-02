@@ -1,7 +1,7 @@
 {
-  "name": "3DCad Studio — Modelagem por Malhas & Impressão 3D",
+  "name": "3DCad Studio — CAD 3D, BRep e Malhas",
   "short_name": "3DCad",
-  "description": "Modelagem 3D local com peças parametrizadas, esboços por cotas, CSG, projetos recuperáveis e exportação STL, 3MF, OBJ e STEP facetado",
+  "description": "Modelagem CAD 3D local com esboços, operações BRep e por malhas, juntas e exportação STL, 3MF, OBJ e STEP",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

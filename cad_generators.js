@@ -953,7 +953,7 @@
     const objects = root.CadMesh.collect(meshes, true);
     const colors = objects.map(o => `<base name="${xml(o.name)}" displaycolor="${o.color.toUpperCase()}FF"/>`).join('');
     const resources = objects.map((o, i) => `<object id="${i + 2}" type="model" name="${xml(o.name)}" pid="1" pindex="${i}"><mesh><vertices>${o.vertices.map(v => `<vertex x="${v[0]}" y="${v[1]}" z="${v[2]}"/>`).join('')}</vertices><triangles>${o.triangles.map(f => `<triangle v1="${f[0]}" v2="${f[1]}" v3="${f[2]}"/>`).join('')}</triangles></mesh></object>`).join('');
-    const modelXml = `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Application">3DCad Studio 1.2</metadata><resources><basematerials id="1">${colors}</basematerials>${resources}</resources><build>${objects.map((o,i)=>`<item objectid="${i+2}"/>`).join('')}</build></model>`;
+    const modelXml = `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Application">3DCad Studio 1.3.7</metadata><resources><basematerials id="1">${colors}</basematerials>${resources}</resources><build>${objects.map((o,i)=>`<item objectid="${i+2}"/>`).join('')}</build></model>`;
     const contentTypesXml = `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>`;
     const relsXml = `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`;
     return buildZipBlob([{name:'[Content_Types].xml',data:contentTypesXml},{name:'_rels/.rels',data:relsXml},{name:'3D/3dmodel.model',data:modelXml}]);
@@ -968,6 +968,7 @@
   async function parse3MF(arrayBuffer, maxTriangles = 750000, maxParts = 150) {
     const buffer = new Uint8Array(arrayBuffer);
     const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    const MAX_MODEL_XML = 32 * 1024 * 1024;
 
     // 1. Locate End of Central Directory
     let eocd = -1;
@@ -975,7 +976,7 @@
       if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
     }
 
-    const entries = {};
+    const entries = Object.create(null);
     if (eocd !== -1) {
       const cdCount = view.getUint16(eocd + 10, true);
       const cdOffset = view.getUint32(eocd + 16, true);
@@ -994,6 +995,7 @@
         const localNameLen = view.getUint16(localOffset + 26, true);
         const localExtraLen = view.getUint16(localOffset + 28, true);
         const dataOffset = localOffset + 30 + localNameLen + localExtraLen;
+        if(dataOffset+compSize>buffer.byteLength)throw new Error("Invalid 3MF ZIP entry");
         entries[name] = { method, compSize, uncompSize, dataOffset };
         p += 46 + nameLen + extraLen + commentLen;
       }
@@ -1008,6 +1010,7 @@
           const extraLen = view.getUint16(offset + 28, true);
           const name = new TextDecoder().decode(new Uint8Array(buffer.buffer, buffer.byteOffset + offset + 30, nameLen));
           const dataOffset = offset + 30 + nameLen + extraLen;
+          if(dataOffset+compSize>buffer.byteLength)throw new Error("Invalid 3MF ZIP entry");
           entries[name] = { method, compSize, uncompSize, dataOffset };
           offset = dataOffset + compSize;
         } else {
@@ -1017,6 +1020,7 @@
     }
 
     async function decompress(entry) {
+      if(entry.uncompSize>MAX_MODEL_XML)throw new Error("3MF model XML exceeds 32 MB");
       const slice = buffer.subarray(entry.dataOffset, entry.dataOffset + entry.compSize);
       if (entry.method === 0) return new TextDecoder().decode(slice);
       if (typeof DecompressionStream !== "undefined") {
@@ -1024,10 +1028,13 @@
         const decomp = stream.pipeThrough(new DecompressionStream("deflate-raw"));
         const r = decomp.getReader();
         const chunks = [];
+        let expandedBytes = 0;
         while (true) {
           const { done, value } = await r.read();
           if (done) break;
           chunks.push(value);
+          expandedBytes += value.byteLength;
+          if(expandedBytes>MAX_MODEL_XML){await r.cancel();throw new Error("3MF model XML exceeds 32 MB");}
         }
         const totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0);
         const merged = new Uint8Array(totalLen);
@@ -1038,13 +1045,28 @@
       if (typeof require !== "undefined") {
         try {
           const zlib = require("zlib");
-          return zlib.inflateRawSync(slice).toString("utf8");
+          return zlib.inflateRawSync(slice,{maxOutputLength:MAX_MODEL_XML}).toString("utf8");
         } catch {}
       }
       throw new Error("DecompressionStream unsupported");
     }
 
     function parseModelXml(xml, sourceName = "part") {
+      const attr = (tag, key) => { const m = tag.match(new RegExp(`(?:^|\\s)${key}\\s*=\\s*["']([^"']*)["']`,"i")); return m?.[1]; };
+      const unit = attr(xml.match(/<model\b[^>]*>/i)?.[0] || "", "unit") || "millimeter";
+      const factor = {millimeter:1,centimeter:10,meter:1000,inch:25.4,foot:304.8,micron:0.001}[unit];
+      if (!factor) throw new Error(`Unsupported 3MF unit: ${unit}`);
+      const transform = value => {
+        const nums = value ? value.trim().split(/\s+/).map(Number) : [1,0,0,0,1,0,0,0,1,0,0,0];
+        if(nums.length!==12 || !nums.every(Number.isFinite)) throw new Error("Invalid 3MF item transform");
+        return nums;
+      };
+      const apply = (v,t) => [v[0]*t[0]+v[1]*t[3]+v[2]*t[6]+t[9],v[0]*t[1]+v[1]*t[4]+v[2]*t[7]+t[10],v[0]*t[2]+v[1]*t[5]+v[2]*t[8]+t[11]];
+      const compose = (a,b) => {
+        const origin=apply(apply([0,0,0],b),a);
+        const cols=[[1,0,0],[0,1,0],[0,0,1]].map(v=>apply(apply(v,b),a).map((n,i)=>n-origin[i]));
+        return [cols[0][0],cols[0][1],cols[0][2],cols[1][0],cols[1][1],cols[1][2],cols[2][0],cols[2][1],cols[2][2],...origin];
+      };
       const colors = [];
       const baseMatMatches = xml.matchAll(/<base\s+[^>]*displaycolor=["\x27](#[0-9a-fA-F]{6,8})/gi);
       for (const m of baseMatMatches) colors.push(m[1].slice(0, 7));
@@ -1052,32 +1074,47 @@
       const objRegex = /<object\s+([^>]*?)>([\s\S]*?)<\/object>/gi;
       let objMatch;
       const parts = [];
+      const objects = new Map();
 
       while ((objMatch = objRegex.exec(xml)) !== null) {
         const attrs = objMatch[1];
         const body = objMatch[2];
-        if (!body.includes("<mesh")) continue;
-
-        const nameMatch = attrs.match(/name=["\x27]([^"\x27]+)/i);
-        const pidMatch = attrs.match(/pindex=["\x27]([^"\x27]+)/i);
-        const partName = (nameMatch ? nameMatch[1] : sourceName).replace(/[^\w\s-]/g, "_").slice(0, 80);
-        const color = (pidMatch && colors[parseInt(pidMatch[1], 10)]) || "#f59e0b";
+        const id=attr(attrs,"id");
+        if (!id) continue;
+        const partName = (attr(attrs,"name") || sourceName).replace(/[^\w\s-]/g, "_").slice(0, 80);
+        const color = colors[Number(attr(attrs,"pindex"))] || "#f59e0b";
 
         const positions = [];
-        const vRegex = /<vertex\s+x=["\x27]([^"\x27]+)["\x27]\s+y=["\x27]([^"\x27]+)["\x27]\s+z=["\x27]([^"\x27]+)/gi;
+        const vRegex = /<vertex\b[^>]*>/gi;
         let vm;
         while ((vm = vRegex.exec(body)) !== null) {
-          const x = parseFloat(vm[1]), y = parseFloat(vm[2]), z = parseFloat(vm[3]);
-          positions.push(x, z, -y); // CAD Z-up -> Three.js Y-up
+          const x = Number(attr(vm[0],"x")), y = Number(attr(vm[0],"y")), z = Number(attr(vm[0],"z"));
+          if (![x,y,z].every(Number.isFinite)) throw new Error("Invalid 3MF vertex");
+          positions.push([x,y,z]);
         }
 
         const indices = [];
-        const tRegex = /<triangle\s+v1=["\x27]([^"\x27]+)["\x27]\s+v2=["\x27]([^"\x27]+)["\x27]\s+v3=["\x27]([^"\x27]+)/gi;
+        const tRegex = /<triangle\b[^>]*>/gi;
         let tm;
         while ((tm = tRegex.exec(body)) !== null) {
-          indices.push(parseInt(tm[1], 10), parseInt(tm[2], 10), parseInt(tm[3], 10));
+          const triangle=["v1","v2","v3"].map(k=>Number(attr(tm[0],k)));
+          if(!triangle.every(n=>Number.isInteger(n)&&n>=0&&n<positions.length)) throw new Error("Invalid 3MF triangle");
+          indices.push(...triangle);
         }
-
+        const components=[];
+        for(const cm of body.matchAll(/<component\b[^>]*>/gi)) components.push({id:attr(cm[0],"objectid"),matrix:transform(attr(cm[0],"transform"))});
+        objects.set(id,{name:partName,color,positions,indices,components});
+      }
+      const build=xml.match(/<build\b[^>]*>([\s\S]*?)<\/build>/i)?.[1];
+      const items=build ? [...build.matchAll(/<item\b[^>]*>/gi)].map(m=>({id:attr(m[0],"objectid"),matrix:transform(attr(m[0],"transform"))})) : [...objects.keys()].map(id=>({id,matrix:transform()}));
+      const visit=(id,matrix,stack=new Set())=>{
+        if(stack.has(id))throw new Error("Cyclic 3MF components");
+        const obj=objects.get(id);
+        if(!obj)throw new Error(`Missing 3MF object: ${id}`);
+        const nextStack=new Set(stack);nextStack.add(id);
+        for(const comp of obj.components)visit(comp.id,compose(matrix,comp.matrix),nextStack);
+        const positions=obj.positions.flatMap(v=>{const [x,y,z]=apply(v,matrix).map(n=>n*factor);return [x,z,-y];});
+        const indices=obj.indices;
         if (positions.length >= 9 && indices.length >= 3) {
           let finalIndices = indices;
           let finalPositions = positions;
@@ -1102,8 +1139,8 @@
           }
           parts.push({
             type: "MESH",
-            name: partName,
-            color,
+            name: obj.name,
+            color: obj.color,
             pos: [0, 0, 0],
             rot: [0, 0, 0],
             scale: [1, 1, 1],
@@ -1112,7 +1149,8 @@
             geometry: { positions: finalPositions, index: finalIndices }
           });
         }
-      }
+      };
+      for(const item of items)visit(item.id,item.matrix);
       return parts;
     }
 

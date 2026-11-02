@@ -1,7 +1,7 @@
 /**
  * 3DCad Studio — Dedicated Web Worker for Exact BRep CAD
  * Runs Open CASCADE Technology WebAssembly and Replicad in a background thread.
- * Guarantees a 60 FPS responsive UI even during heavy BRep booleans, lofts, sweeps, and STEP I/O.
+ * Keeps BRep calculations off the main thread; frame rate depends on the device and scene.
  */
 import opencascade from "./libs/replicad_single.js";
 import * as replicad from "./libs/replicad.bundle.js";
@@ -151,7 +151,7 @@ self.onmessage = async function (e) {
         else if (t === "SPHERE") solid = self.CadExactEngine.makeExactSphere(rep, p);
         else if (t === "CONE") solid = self.CadExactEngine.makeExactCone(rep, p);
         else if (t === "TORUS") solid = self.CadExactEngine.makeExactTorus(rep, p);
-        else if (t === "EXTRUDE") solid = self.CadExactEngine.makeExactExtrude(rep, shapeData.profiles, p);
+        else if (t === "EXTRUDE" || t === "SKETCH_EXTRUDE") solid = self.CadExactEngine.makeExactExtrude(rep, shapeData.profiles, p);
         else if (t === "REVOLVE") solid = self.CadExactEngine.makeExactRevolve(rep, shapeData.profiles, p);
         else throw new Error(`Operação BRep não suportada para o tipo: ${t}. Válido para Cubo, Cilindro, Esfera, Cone, Torus e Esboços.`);
 
@@ -192,16 +192,24 @@ self.onmessage = async function (e) {
             else if (feat.type === "EXTRUDE") solid = self.CadExactEngine.makeExactExtrude(rep, feat.profiles, feat.params);
             else if (feat.type === "REVOLVE") solid = self.CadExactEngine.makeExactRevolve(rep, feat.profiles, feat.params);
             if (solid) {
-              if (Array.isArray(feat.rot)) {
-                const [rx, ry, rz] = feat.rot;
-                if (rx) solid = solid.rotate(rx, [0, 0, 0], [1, 0, 0]);
-                if (ry) solid = solid.rotate(ry, [0, 0, 0], [0, 1, 0]);
-                if (rz) solid = solid.rotate(rz, [0, 0, 0], [0, 0, 1]);
+              const local = feat.localCenter || [0,0,0];
+              const center = solid.boundingBox.center;
+              const delta = local.map((n,j) => n-center[j]);
+              if (delta.some(n => Math.abs(n)>1e-9)) { const moved=solid.translate(delta);solid.delete();solid=moved; }
+              if (Array.isArray(feat.quaternion)) {
+                const [x,y,z,w]=feat.quaternion;
+                const angle=2*Math.acos(Math.max(-1,Math.min(1,w)));
+                const sin=Math.sin(angle/2);
+                if (Math.abs(sin)>1e-9 && angle>1e-9) {
+                  const axis=[x/sin,-z/sin,y/sin];
+                  const rotated=solid.rotate(angle*180/Math.PI,[0,0,0],axis);
+                  solid.delete();solid=rotated;
+                }
               }
-              if (Array.isArray(feat.pos) && (feat.pos[0] || feat.pos[1] || feat.pos[2])) {
-                const t = solid.translate(feat.pos);
-                solid.delete();
-                solid = t;
+              if (Array.isArray(feat.pos)) {
+                const [x,y,z]=feat.pos;
+                const move=[x,-z,y];
+                if (move.some(n => Math.abs(n)>1e-9)) { const moved=solid.translate(move);solid.delete();solid=moved; }
               }
               validShapes.push({
                 shape: solid,
@@ -209,7 +217,11 @@ self.onmessage = async function (e) {
                 color: feat.color || "#f97316"
               });
             }
-          } catch {}
+            else throw new Error(`Tipo BRep não suportado: ${feat.type}`);
+          } catch (error) {
+            validShapes.forEach(s => s.shape.delete());
+            throw new Error(`Peça ${feat.name || i+1}: ${error.message}`);
+          }
         }
         if (features.length > 0 && validShapes.length < features.length) {
           validShapes.forEach(s => s.shape.delete());

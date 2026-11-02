@@ -10,6 +10,8 @@ const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio
 const { z } = require("zod");
 const fs = require("node:fs");
 const path = require("node:path");
+const THREE = require("./libs/three.min.js");
+globalThis.THREE = THREE;
 
 const CadSketchSolver = require("./cad_sketch_solver.js");
 const CadProject = require("./cad_project.js");
@@ -22,15 +24,27 @@ let activeSolids = [];
 let activeFeatures = [];
 let assemblyManager = new CadAssembly.AssemblyManager();
 
+function meshesForExport() {
+  return activeSolids.filter(item => item.visible !== false).map(item => {
+    const mesh = new THREE.Mesh(CadProject.geometry(item), new THREE.MeshBasicMaterial());
+    mesh.position.fromArray(item.pos);
+    mesh.rotation.set(...item.rot.map(THREE.MathUtils.degToRad));
+    mesh.scale.fromArray(item.scale || [1, 1, 1]);
+    mesh.userData = { name: item.name, color: item.color };
+    mesh.updateWorldMatrix(true, false);
+    return mesh;
+  });
+}
+
 const server = new McpServer({
   name: "3dcad-studio",
-  version: "1.3.0",
+  version: "1.3.7",
   description: "Parametric 3D CAD & BRep Modeling Server for 3DCad Studio",
 });
 
 // Resource: cad://project/json
 server.resource("project-json", "cad://project/json", async () => {
-  const doc = CadProject.document(activeSolids);
+  const doc = CadProject.document(activeSolids, assemblyManager.serialize());
   return {
     contents: [
       {
@@ -123,11 +137,6 @@ server.tool(
       "PULLEY",
       "PILLOW_BLOCK",
       "SNAP_LID_BOX",
-      "REVOLVE_SOLID",
-      "LOFT_SOLID",
-      "SWEEP_SOLID",
-      "BREP_SOLID",
-      "CSG_SOLID",
     ]),
     name: z.string().optional(),
     color: z.string().optional(),
@@ -150,6 +159,7 @@ server.tool(
       scale: [1, 1, 1],
       visible: true,
     };
+    CadProject.validateItems([solidRecord]);
     activeSolids.push(solidRecord);
     activeFeatures.push({ id, type, params: validParams, name: partName });
     return {
@@ -270,6 +280,9 @@ server.tool(
     value: z.number().optional(),
   },
   async (config) => {
+    if (config.bodyA === config.bodyB || !activeSolids.some(s=>s.id===config.bodyA) || !activeSolids.some(s=>s.id===config.bodyB))
+      throw new Error("Joint requires two different existing bodies");
+    if (config.limits && config.limits.min > config.limits.max) throw new Error("Invalid joint limits");
     const joint = assemblyManager.addJoint(config);
     return {
       content: [
@@ -285,7 +298,7 @@ server.tool(
 // Tool 6: cad_export_step
 server.tool(
   "cad_export_step",
-  "Export the current model to a STEP file on disk",
+  "Export the current model to a faceted STEP file on disk",
   {
     filepath: z.string(),
   },
@@ -294,22 +307,11 @@ server.tool(
       throw new Error("Scene is empty, cannot export STEP");
     }
     const resolvedPath = path.resolve(filepath);
-    const threeMeshes = activeSolids.map((item) => {
-      const g = CadProject.geometry(item);
-      const m = {
-        geometry: g,
-        position: { toArray: () => item.pos, x: item.pos[0], y: item.pos[1], z: item.pos[2] },
-        rotation: { x: item.rot[0], y: item.rot[1], z: item.rot[2] },
-        scale: { toArray: () => [1, 1, 1], x: 1, y: 1, z: 1 },
-        matrixWorld: { determinant: () => 1 },
-        updateWorldMatrix: () => {},
-        visible: true,
-        userData: { name: item.name, color: item.color },
-      };
-      return m;
-    });
+    const threeMeshes = meshesForExport();
 
-    const stepBlob = CadMesh.step(threeMeshes);
+    let stepBlob;
+    try { stepBlob = CadMesh.step(threeMeshes); }
+    finally { threeMeshes.forEach(m=>{m.geometry.dispose();m.material.dispose();}); }
     const buffer = Buffer.from(await stepBlob.arrayBuffer());
     fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
     fs.writeFileSync(resolvedPath, buffer);
@@ -317,7 +319,7 @@ server.tool(
       content: [
         {
           type: "text",
-          text: `STEP exported to ${resolvedPath} (${buffer.length} bytes).`,
+          text: `Faceted STEP exported to ${resolvedPath} (${buffer.length} bytes).`,
         },
       ],
     };
@@ -336,22 +338,11 @@ server.tool(
       throw new Error("Scene is empty, cannot export STL");
     }
     const resolvedPath = path.resolve(filepath);
-    const threeMeshes = activeSolids.map((item) => {
-      const g = CadProject.geometry(item);
-      const m = {
-        geometry: g,
-        position: { toArray: () => item.pos, x: item.pos[0], y: item.pos[1], z: item.pos[2] },
-        rotation: { x: item.rot[0], y: item.rot[1], z: item.rot[2] },
-        scale: { toArray: () => [1, 1, 1], x: 1, y: 1, z: 1 },
-        matrixWorld: { determinant: () => 1 },
-        updateWorldMatrix: () => {},
-        visible: true,
-        userData: { name: item.name, color: item.color },
-      };
-      return m;
-    });
+    const threeMeshes = meshesForExport();
 
-    const stlBlob = CadMesh.stl(threeMeshes);
+    let stlBlob;
+    try { stlBlob = CadMesh.stl(threeMeshes); }
+    finally { threeMeshes.forEach(m=>{m.geometry.dispose();m.material.dispose();}); }
     const buffer = Buffer.from(await stlBlob.arrayBuffer());
     fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
     fs.writeFileSync(resolvedPath, buffer);

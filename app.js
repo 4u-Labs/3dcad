@@ -125,7 +125,7 @@
       btnSyncMcp: "Sincronizar",
       ecoModalTitle: "Aplicativos, suporte e comunidade — 4u-Labs",
       ecoModalDesc:
-        "O 3DCad Studio faz parte do ecossistema gratuito e privado da 4u-Labs. Modele peças técnicas 3D direto no navegador, sem anúncios e sem limites de exportação.",
+        "O 3DCad Studio faz parte do ecossistema gratuito e privado da 4u-Labs. Modele peças técnicas 3D no navegador, sem anúncios, e exporte nos formatos compatíveis.",
       supportProject: "Apoiar o projeto (PayPal)",
     },
     en: {
@@ -242,7 +242,7 @@
       btnSyncMcp: "Sync Scene",
       ecoModalTitle: "Apps, support and community — 4u-Labs",
       ecoModalDesc:
-        "3DCad Studio is part of the free, privacy-first 4u-Labs ecosystem. Model parametric 3D parts directly in your browser with no ads and no export limits.",
+        "3DCad Studio is part of the free, privacy-first 4u-Labs ecosystem. Model technical 3D parts in your browser without ads and export in supported formats.",
       supportProject: "Support the project (PayPal)",
     },
   };
@@ -523,7 +523,7 @@
 
   function flushEdits() { [...pendingEdits].forEach(flush => flush()); }
 
-  function pushUndoSnapshot(snapshot = JSON.stringify(serializeSceneState())) {
+  function pushUndoSnapshot(snapshot = JSON.stringify(currentProjectDocument())) {
     if (undoStack.at(-1) !== snapshot) undoStack.push(snapshot);
     // Snapshots include meshes. Bound both count and serialized memory.
     let bytes = undoStack.reduce((sum, item) => sum + item.length, 0);
@@ -533,11 +533,12 @@
 
   function currentProjectDocument() {
     const joints = assemblyManager ? assemblyManager.serialize() : [];
-    return CadProject.document(serializeSceneState(), joints);
+    return CadProject.document(serializeSceneState(), joints, assemblyManager ? assemblyManager.serializeBases() : {});
   }
 
-  function restoreSceneFromItems(items, joints = null) {
-    const records = CadProject.validateItems(items), staged = [];
+  function restoreSceneFromItems(items, joints = [], assemblyBases = {}) {
+    const validated = CadProject.read(CadProject.document(items, joints, assemblyBases));
+    const records = validated.solids, staged = [];
     try { let triangles=0;for (const item of records) { const mesh=buildSolid(item.type,item);staged.push(mesh);triangles+=triangleCount(mesh.geometry);if(triangles>CadMesh.MAX_TRIANGLES)throw new Error(L("Projeto excede 1.000.000 triângulos.", "Project exceeds 1,000,000 triangles.")); } }
     catch (error) { staged.forEach(disposeMesh); throw error; }
     const selectedId = selectedSolid?.userData.id;
@@ -548,13 +549,16 @@
     selectedSolid = null;
     timelineStep = solids.length;
     if (assemblyManager) {
-      if (Array.isArray(joints)) {
-        try { assemblyManager.deserialize(joints); } catch {}
-      }
+      assemblyManager.clear();
       solids.forEach(s => {
         if (s.userData.id) assemblyManager.registerBody(s.userData.id, s.userData.name, s);
       });
+      assemblyManager.restoreBases(validated.assemblyBases);
+      if (!Object.keys(validated.assemblyBases).length && validated.joints.length)
+        assemblyManager.inferBasesFromCurrentPose(validated.joints);
+      assemblyManager.deserialize(validated.joints);
     }
+    activeJointId = null;
     restoring = false;
     selectSolid(solids.find(mesh => mesh.userData.id === selectedId) || solids.at(-1) || null);
     refreshAllUI();
@@ -566,9 +570,9 @@
       showToast(L("Nada para desfazer.", "Nothing to undo."));
       return;
     }
-    redoStack.push(JSON.stringify(serializeSceneState()));
+    redoStack.push(JSON.stringify(currentProjectDocument()));
     const prev = JSON.parse(undoStack.pop());
-    restoreSceneFromItems(prev);
+    restoreSceneFromItems(prev.solids || prev, prev.joints, prev.assemblyBases);
     showToast(L("Desfeito (Ctrl+Z)", "Undone (Ctrl+Z)"));
   }
 
@@ -578,9 +582,9 @@
       showToast(L("Nada para refazer.", "Nothing to redo."));
       return;
     }
-    undoStack.push(JSON.stringify(serializeSceneState()));
+    undoStack.push(JSON.stringify(currentProjectDocument()));
     const next = JSON.parse(redoStack.pop());
-    restoreSceneFromItems(next);
+    restoreSceneFromItems(next.solids || next, next.joints, next.assemblyBases);
     showToast(L("Refeito (Ctrl+Y)", "Redone (Ctrl+Y)"));
   }
 
@@ -605,6 +609,7 @@
     if (!mesh) return;
     const idx = solids.indexOf(mesh);
     if (idx !== -1) solids.splice(idx, 1);
+    assemblyManager?.unregisterBody(mesh.userData.id);
     scene.remove(mesh);
     disposeMesh(mesh);
     if (selectedSolid === mesh) {
@@ -623,6 +628,8 @@
       disposeMesh(m);
     }
     selectedSolid = null;
+    assemblyManager?.clear();
+    activeJointId = null;
     timelineStep = 0;
     refreshAllUI();
   }
@@ -842,14 +849,14 @@
       if (snapshot === null) return;
       try {
         apply(input.value);
-        if (snapshot !== JSON.stringify(serializeSceneState())) pushUndoSnapshot(snapshot);
+        if (snapshot !== JSON.stringify(currentProjectDocument())) pushUndoSnapshot(snapshot);
         input.setCustomValidity("");
       } catch (error) { input.setCustomValidity(error.message); input.reportValidity(); showToast(error.message); }
       snapshot = null;
     };
     input.addEventListener("input", () => {
       if (!selectedSolid) return;
-      if (snapshot === null) snapshot = JSON.stringify(serializeSceneState());
+      if (snapshot === null) snapshot = JSON.stringify(currentProjectDocument());
       if (debounce) { clearTimeout(timer); pendingEdits.add(commit); timer = setTimeout(commit, 220); }
       else { pendingEdits.add(commit); commit(); }
     });
@@ -895,23 +902,25 @@
     joints.forEach((joint) => {
       const card = document.createElement("div");
       card.className = "joint-card";
-      card.innerHTML = `
-        <div class="joint-header">
-          <span class="joint-title">
-            <span style="color:var(--accent-cyan); font-weight:700;">${joint.type.toUpperCase()}</span>
-            <b>${joint.name}</b>
-          </span>
-          <button type="button" class="tree-act-btn" style="min-width:24px; min-height:24px;" title="${L("Excluir", "Delete")}">×</button>
-        </div>
-        <div class="joint-row">
-          <span>${joint.bodyA} ➔ ${joint.bodyB}</span>
-          <span>${joint.value.toFixed(1)}${joint.type === "revolute" ? "°" : " mm"}</span>
-        </div>
-      `;
+      const header = document.createElement("div"); header.className = "joint-header";
+      const title = document.createElement("span"); title.className = "joint-title";
+      const type = document.createElement("span"); type.style.cssText = "color:var(--accent-cyan);font-weight:700"; type.textContent = joint.type.toUpperCase();
+      const name = document.createElement("b"); name.textContent = joint.name;
+      title.append(type, name);
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "tree-act-btn";
+      remove.style.cssText = "min-width:24px;min-height:24px"; remove.title = L("Excluir", "Delete"); remove.textContent = "×";
+      header.append(title, remove);
+      const row = document.createElement("div"); row.className = "joint-row";
+      const bodies = document.createElement("span"); bodies.textContent = `${joint.bodyA} ➔ ${joint.bodyB}`;
+      const value = document.createElement("span"); value.textContent = `${joint.value.toFixed(1)}${joint.type === "revolute" ? "°" : " mm"}`;
+      row.append(bodies, value); card.append(header, row);
       card.querySelector("button").onclick = (e) => {
         e.stopPropagation();
+        pushUndoSnapshot();
         if (assemblyManager) assemblyManager.removeJoint(joint.id);
+        if (activeJointId === joint.id) activeJointId = null;
         renderAssemblyJointsList();
+        saveAutoSave();
         showToast(L("Junta removida", "Joint removed"));
       };
       card.onclick = () => {
@@ -1617,8 +1626,13 @@
     if (type === "fixed") {
       cObj = { id: cId, type, entity: target.id, point: target.id, x: target.x, y: target.y, ...extra };
     } else if (type === "distance") {
-      const val = extra.value || (target.w || (target.r ? target.r * 2 : 30));
-      cObj = { id: cId, type, entity: target.id, line: target.id, value: val, ...extra };
+      const raw = $("#skConstraintValue")?.value;
+      const val = raw === "" ? (target.w || (target.r ? target.r * 2 : 30)) : Number(raw);
+      if (!Number.isFinite(val) || val <= 0 || val > 2000) {
+        showToast(L("Informe uma distância válida em mm.", "Enter a valid distance in mm."));
+        return;
+      }
+      cObj = { id: cId, type: target.kind === "circle" ? "diameter" : "distanceX", entity: target.id, value: val };
     } else if (type === "horizontal" || type === "vertical") {
       cObj = { id: cId, type, line: target.id, entity: target.id, ...extra };
     } else if (["concentric", "equal", "parallel", "perpendicular", "tangent", "coincident"].includes(type)) {
@@ -1649,6 +1663,13 @@
         ...extra,
       };
     }
+    let probe;
+    try { probe = SketchSolver?.solveSketch({entities:JSON.parse(JSON.stringify(skEntities)),constraints:[cObj]}); }
+    catch (error) { showToast(error.message); return; }
+    if (!probe?.equations) {
+      showToast(L("Restrição não aplicável a esta forma.", "Constraint does not apply to this shape."));
+      return;
+    }
     skConstraints.push(cObj);
     solveActiveSketch();
   }
@@ -1656,7 +1677,7 @@
   $("#btnSkConstraintH")?.addEventListener("click", () => addSketchConstraint("horizontal"));
   $("#btnSkConstraintV")?.addEventListener("click", () => addSketchConstraint("vertical"));
   $("#btnSkConstraintCoinc")?.addEventListener("click", () => addSketchConstraint("coincident"));
-  $("#btnSkConstraintDist")?.addEventListener("click", () => addSketchConstraint("distance", { value: 30 }));
+  $("#btnSkConstraintDist")?.addEventListener("click", () => addSketchConstraint("distance"));
   $("#btnSkConstraintTan")?.addEventListener("click", () => addSketchConstraint("tangent"));
   $("#btnSkConstraintPerp")?.addEventListener("click", () => addSketchConstraint("perpendicular"));
   $("#btnSkConstraintPar")?.addEventListener("click", () => addSketchConstraint("parallel"));
@@ -1774,6 +1795,7 @@
       height: h,
       bevel: 0,
       entities: JSON.parse(JSON.stringify(skEntities)),
+      constraints: JSON.parse(JSON.stringify(skConstraints)),
     });
     const preview = CadGenerators.buildParametricGeometry("SKETCH_EXTRUDE", params);
     preview.dispose();
@@ -1916,22 +1938,32 @@
 
   async function exportStepExact() {
     flushEdits();
-    if (!solids.length) {
+    const visible = solids.filter(s => s.visible);
+    if (!visible.length) {
       showToast(L("Cena vazia.", "Scene is empty."));
       return;
     }
     showToast(L("Gerando STEP BRep analítico...", "Generating analytic BRep STEP..."));
     try {
-      if (Kernel && Kernel.isAvailable) {
-        const features = solids.map((s, i) => ({
-          type: s.userData.type,
+      if (!Kernel?.isAvailable) throw new Error(L("Motor BRep indisponível.", "BRep kernel unavailable."));
+      const features = visible.map((s, i) => {
+        if (!s.userData.isParametric || !BREP_PRIMITIVE_TYPES.has(s.userData.type))
+          throw new Error(L(`Peça ${s.userData.name} não possui BRep recuperável. Use .STEP Malha.`, `Part ${s.userData.name} has no recoverable BRep. Use .STEP Mesh.`));
+        if (s.scale.toArray().some(v => Math.abs(v - 1) > 1e-8))
+          throw new Error(L(`Peça ${s.userData.name} tem escala aplicada. Use .STEP Malha.`, `Part ${s.userData.name} is scaled. Use .STEP Mesh.`));
+        s.geometry.computeBoundingBox();
+        const center = s.geometry.boundingBox.getCenter(new THREE.Vector3());
+        return {
+          type: s.userData.type === "SKETCH_EXTRUDE" ? "EXTRUDE" : s.userData.type,
           name: s.userData.name || `Solid_${i + 1}`,
           color: s.userData.color || "#f97316",
           params: s.userData.params || {},
-          profiles: s.userData.params?.entities && SketchSolver ? SketchSolver.extractProfiles(s.userData.params.entities) : undefined,
+          profiles: s.userData.params?.entities && SketchSolver ? SketchSolver.extractProfiles({entities:s.userData.params.entities}, {invertY:true}) : undefined,
           pos: s.position.toArray(),
-          rot: [s.rotation.x, s.rotation.y, s.rotation.z].map(THREE.MathUtils.radToDeg),
-        }));
+          quaternion: s.quaternion.toArray(),
+          localCenter: [center.x,-center.z,center.y],
+        };
+      });
         const res = await Kernel.exportSTEP(
           features,
           selectedSolid?.userData.name || "Part",
@@ -1942,15 +1974,10 @@
           showToast(L("STEP BRep analítico exportado com sucesso!", "Analytic BRep STEP exported successfully!"));
           return;
         }
-      }
-      const blob = CadGenerators.exportMeshesToSTEP(solids);
-      downloadBlob(blob, "modelo_3dcad.step");
-      showToast(L("STEP exportado.", "STEP exported."));
+      throw new Error(L("Exportação BRep não retornou arquivo.", "BRep export returned no file."));
     } catch (err) {
-      console.warn("STEP exact fallback:", err);
-      const blob = CadGenerators.exportMeshesToSTEP(solids);
-      downloadBlob(blob, "modelo_3dcad.step");
-      showToast(L("STEP exportado.", "STEP exported."));
+      console.warn("STEP BRep export:", err);
+      showToast(err.message || L("Falha na exportação BRep.", "BRep export failed."));
     }
   }
 
@@ -2110,6 +2137,26 @@
 
   const BREP_PRIMITIVE_TYPES = new Set(["BOX", "CYLINDER", "SPHERE", "CONE", "TORUS", "EXTRUDE", "SKETCH_EXTRUDE", "REVOLVE"]);
 
+  function exactFeatureFromMesh(mesh) {
+    const params=mesh.userData.params||{};
+    return {type:mesh.userData.type,params,
+      profiles:params.entities && SketchSolver ? SketchSolver.extractProfiles({entities:params.entities},{invertY:true}) : undefined};
+  }
+
+  function replaceWithBRepMesh(mesh, meshData) {
+    if(!solids.includes(mesh))throw new Error(L("A peça foi removida durante o cálculo.","The part was removed during computation."));
+    if(!meshData?.positions?.length)throw new Error(L("Geometria resultante inválida","Invalid resulting geometry"));
+    const {geometry}=Kernel.toThreeGeometry(meshData);
+    mesh.geometry.computeBoundingBox();geometry.computeBoundingBox();
+    const oldCenter=mesh.geometry.boundingBox.getCenter(new THREE.Vector3());
+    const newCenter=geometry.boundingBox.getCenter(new THREE.Vector3());
+    geometry.translate(oldCenter.x-newCenter.x,oldCenter.y-newCenter.y,oldCenter.z-newCenter.z);
+    mesh.geometry.dispose();mesh.geometry=geometry;
+    attachCadEdges(mesh);applyVisualStyleToMesh(mesh);
+    mesh.userData.isParametric=false;mesh.userData.type="BREP_SOLID";
+    refreshAllUI();
+  }
+
   async function applyFilletBRep() {
     if (!selectedSolid) {
       showToast(L("Selecione um sólido para arredondar (Fillet).", "Select a solid to fillet."));
@@ -2126,20 +2173,10 @@
     pushUndoSnapshot();
     try {
       showToast(L("Aplicando Fillet BRep analítico...", "Applying analytic BRep Fillet..."));
-      const meshData = await Kernel.applyEdgeFinish("fillet", { radius: 2 }, {
-        type: selectedSolid.userData.type,
-        params: selectedSolid.userData.params || {}
-      });
+      const target=selectedSolid;
+      const meshData = await Kernel.applyEdgeFinish("fillet", { radius: 2 }, exactFeatureFromMesh(target));
       if (meshData && meshData.positions && meshData.positions.length) {
-        const threeData = Kernel.toThreeGeometry(meshData);
-        selectedSolid.geometry.dispose();
-        selectedSolid.geometry = threeData.geometry;
-        attachCadEdges(selectedSolid);
-        applyVisualStyleToMesh(selectedSolid);
-        selectedSolid.userData.isParametric = false;
-        selectedSolid.userData.type = "BREP_SOLID";
-        updateTelemetryAndPrintMetrics();
-        refreshAllUI();
+        replaceWithBRepMesh(target,meshData);
         showToast(L("Arredondamento (Fillet 2mm) BRep aplicado com sucesso!", "Analytic BRep Fillet (2mm) applied successfully!"));
         return;
       } else {
@@ -2167,20 +2204,10 @@
     pushUndoSnapshot();
     try {
       showToast(L("Aplicando Chamfer BRep analítico...", "Applying analytic BRep Chamfer..."));
-      const meshData = await Kernel.applyEdgeFinish("chamfer", { distance: 1.5 }, {
-        type: selectedSolid.userData.type,
-        params: selectedSolid.userData.params || {}
-      });
+      const target=selectedSolid;
+      const meshData = await Kernel.applyEdgeFinish("chamfer", { distance: 1.5 }, exactFeatureFromMesh(target));
       if (meshData && meshData.positions && meshData.positions.length) {
-        const threeData = Kernel.toThreeGeometry(meshData);
-        selectedSolid.geometry.dispose();
-        selectedSolid.geometry = threeData.geometry;
-        attachCadEdges(selectedSolid);
-        applyVisualStyleToMesh(selectedSolid);
-        selectedSolid.userData.isParametric = false;
-        selectedSolid.userData.type = "BREP_SOLID";
-        updateTelemetryAndPrintMetrics();
-        refreshAllUI();
+        replaceWithBRepMesh(target,meshData);
         showToast(L("Chanfro (Chamfer 1.5mm) BRep aplicado com sucesso!", "Analytic BRep Chamfer (1.5mm) applied successfully!"));
         return;
       } else {
@@ -2208,20 +2235,10 @@
     pushUndoSnapshot();
     try {
       showToast(L("Aplicando Shell BRep analítico...", "Applying analytic BRep Shell..."));
-      const meshData = await Kernel.applyEdgeFinish("shell", { thickness: 2 }, {
-        type: selectedSolid.userData.type,
-        params: selectedSolid.userData.params || {}
-      });
+      const target=selectedSolid;
+      const meshData = await Kernel.applyEdgeFinish("shell", { thickness: 2 }, exactFeatureFromMesh(target));
       if (meshData && meshData.positions && meshData.positions.length) {
-        const threeData = Kernel.toThreeGeometry(meshData);
-        selectedSolid.geometry.dispose();
-        selectedSolid.geometry = threeData.geometry;
-        attachCadEdges(selectedSolid);
-        applyVisualStyleToMesh(selectedSolid);
-        selectedSolid.userData.isParametric = false;
-        selectedSolid.userData.type = "BREP_SOLID";
-        updateTelemetryAndPrintMetrics();
-        refreshAllUI();
+        replaceWithBRepMesh(target,meshData);
         showToast(L("Casca oca (Shell 2mm) BRep criada com sucesso!", "Analytic BRep Shell (2mm) created successfully!"));
         return;
       } else {
@@ -2264,6 +2281,7 @@
       assemblyAnimFrame = requestAnimationFrame(animStep);
     } else if (assemblyAnimFrame) {
       cancelAnimationFrame(assemblyAnimFrame);
+      saveAutoSave();
     }
   }
 
@@ -2305,10 +2323,17 @@
     const type = $("#jointTypeSelect")?.value || "revolute";
     const axisKey = $("#jointAxisSelect")?.value || "Z";
     const axis = axisKey === "X" ? [1, 0, 0] : axisKey === "Y" ? [0, 1, 0] : [0, 0, 1];
-    const minLim = Number($("#jointLimitMin")?.value) || (type === "revolute" ? -180 : 0);
-    const maxLim = Number($("#jointLimitMax")?.value) || (type === "revolute" ? 180 : 50);
+    const minRaw = $("#jointLimitMin")?.value;
+    const maxRaw = $("#jointLimitMax")?.value;
+    const minLim = minRaw === "" ? (type === "revolute" ? -180 : 0) : Number(minRaw);
+    const maxLim = maxRaw === "" ? (type === "revolute" ? 180 : 50) : Number(maxRaw);
+    if (!Number.isFinite(minLim) || !Number.isFinite(maxLim) || minLim > maxLim) {
+      showToast(L("Limites da junta inválidos.", "Invalid joint limits."));
+      return;
+    }
 
     if (assemblyManager) {
+      pushUndoSnapshot();
       assemblyManager.registerBody(bodyA.userData.id, bodyA.userData.name, bodyA);
       assemblyManager.registerBody(bodyB.userData.id, bodyB.userData.name, bodyB);
       const joint = assemblyManager.addJoint({
@@ -2322,18 +2347,21 @@
       });
       activeJointId = joint.id;
       renderAssemblyJointsList();
+      saveAutoSave();
       showToast(L(`Junta "${name}" (${type}) adicionada!`, `Joint "${name}" (${type}) added!`));
     }
   });
 
   $('#btnResetAssembly')?.addEventListener("click", () => {
     if (assemblyManager) {
+      pushUndoSnapshot();
       assemblyManager.joints.forEach((j) => assemblyManager.setJointValue(j.id, 0));
       const slider = $("#rangeJointSimulate");
       if (slider) slider.value = 0;
       const lbl = $("#jointSimulateVal");
       if (lbl) lbl.textContent = "0°";
       renderAssemblyJointsList();
+      saveAutoSave();
       showToast(L("Posição de montagem resetada.", "Assembly position reset."));
     }
   });
@@ -2350,9 +2378,12 @@
         const lbl = $("#jointSimulateVal");
         if (lbl) lbl.textContent = `${val.toFixed(1)}${unit}`;
         renderAssemblyJointsList();
+        saveAutoSave();
       }
     }
   });
+  $('#rangeJointSimulate')?.addEventListener("pointerdown", () => { if(activeJointId) pushUndoSnapshot(); });
+  $('#rangeJointSimulate')?.addEventListener("keydown", () => { if(activeJointId) pushUndoSnapshot(); });
 
   function parseSTLToMesh(bytes, name, color = '#38bdf8') {
     if (bytes.byteLength < 15) throw new Error(L('STL vazio ou inválido.', 'Empty or invalid STL.'));
@@ -2418,7 +2449,7 @@
     if (/\.json$/i.test(file.name)) {
       const doc = CadProject.read(await file.text());
       // Restore stages every object before committing. Invalid input leaves the scene intact.
-      pushUndoSnapshot(); restoreSceneFromItems(doc.solids, doc.joints);
+      pushUndoSnapshot(); restoreSceneFromItems(doc.solids, doc.joints, doc.assemblyBases);
     } else if (/\.stl$/i.test(file.name)) {
       const bytes = await file.arrayBuffer();
       const mesh = parseSTLToMesh(bytes, file.name);
@@ -2466,7 +2497,7 @@
       }
       const threeData = Kernel.toThreeGeometry(meshData);
       const record = {
-        type: 'BREP_SOLID',
+        type: 'STEP_MESH',
         name: file.name.replace(/\.(step|stp)$/i, '').slice(0, 160),
         color: '#38bdf8',
         params: {},
@@ -2555,7 +2586,7 @@
   }));
   $('#aiPromptInput').addEventListener('input',()=>{ proposedCommand = null; $('#btnApplyCommand').disabled = true; });
   $('#btnApplyMcpJson').onclick = () => {
-    try { const doc = CadProject.read($('#mcpJsonConsole').value); flushEdits(); pushUndoSnapshot(); restoreSceneFromItems(doc.solids); zoomFitScene(); showToast(L('Projeto JSON validado e aberto.', 'JSON project validated and opened.')); }
+    try { const doc = CadProject.read($('#mcpJsonConsole').value); flushEdits(); pushUndoSnapshot(); restoreSceneFromItems(doc.solids, doc.joints, doc.assemblyBases); zoomFitScene(); showToast(L('Projeto JSON validado e aberto.', 'JSON project validated and opened.')); }
     catch(error) { showToast(error.message); }
   };
   $('#btnRefreshMcpJson').onclick = renderProjectConsole;
@@ -2565,7 +2596,7 @@
     catch { showToast(L('Selecione o JSON e use Ctrl+C.', 'Select the JSON and use Ctrl+C.')); }
   };
   $('#btnRecoverProject').onclick = async () => {
-    try { const backup = await projectStore.load(true); if (!backup) throw new Error(L('Nenhuma cópia anterior disponível.', 'No previous copy available.')); flushEdits(); pushUndoSnapshot(); restoreSceneFromItems(backup.solids, backup.joints); zoomFitScene(); showToast(L('Cópia anterior recuperada. Desfazer restaura a cena atual.', 'Previous copy recovered. Undo restores the current scene.')); }
+    try { const backup = await projectStore.load(true); if (!backup) throw new Error(L('Nenhuma cópia anterior disponível.', 'No previous copy available.')); flushEdits(); pushUndoSnapshot(); restoreSceneFromItems(backup.solids, backup.joints, backup.assemblyBases); zoomFitScene(); showToast(L('Cópia anterior recuperada. Desfazer restaura a cena atual.', 'Previous copy recovered. Undo restores the current scene.')); }
     catch (error) { showToast(error.message); }
   };
 
@@ -2580,13 +2611,10 @@
           if (/\.stl$/i.test(demo.file)) {
             const bytes = await resp.arrayBuffer();
             const mesh = parseSTLToMesh(bytes, demo.titlePt || "T-800", demo.color || "#38bdf8");
+            const record = CadProject.serialize(mesh);
+            disposeMesh(mesh);
             pushUndoSnapshot();
-            for (const m of solids) { scene.remove(m); disposeMesh(m); }
-            solids = [mesh];
-            scene.add(mesh);
-            timelineStep = solids.length;
-            selectSolid(mesh);
-            refreshAllUI();
+            restoreSceneFromItems([record]);
             zoomFitScene();
             showToast(L(demo.titlePt, demo.titleEn));
             return;
@@ -2594,7 +2622,7 @@
           const doc = await resp.json();
           if (doc && Array.isArray(doc.solids) && doc.solids.length > 0) {
             pushUndoSnapshot();
-            restoreSceneFromItems(doc.solids);
+            restoreSceneFromItems(doc.solids, doc.joints, doc.assemblyBases);
             zoomFitScene();
             showToast(L(demo.titlePt, demo.titleEn));
             return;
@@ -2755,7 +2783,7 @@
   }
   $('#btnEditSketch').onclick=()=>{
     if(selectedSolid?.userData.type!=='SKETCH_EXTRUDE')return showToast(L('Selecione uma extrusão de esboço.', 'Select a sketch extrusion.'));
-    editingSketchId=selectedSolid.userData.id;skEntities=JSON.parse(JSON.stringify(selectedSolid.userData.params.entities));
+    editingSketchId=selectedSolid.userData.id;skEntities=JSON.parse(JSON.stringify(selectedSolid.userData.params.entities));skConstraints=JSON.parse(JSON.stringify(selectedSolid.userData.params.constraints||[]));
     $('#sketchExtrudeHeight').value=selectedSolid.userData.params.height;
     sketchOverlay.hidden=false;renderSketchFields();resizeSketchCanvas();
   };
@@ -2814,7 +2842,7 @@
         saved.solids[0]?.name === "Chassi_Trator_JCB" &&
         saved.solids[1]?.name === "Capo_Motor_JCB";
       if (saved && !isOldJcb) {
-        restoreSceneFromItems(saved.solids, saved.joints);
+        restoreSceneFromItems(saved.solids, saved.joints, saved.assemblyBases);
       } else {
         await loadDemoProject("gearbox");
       }
@@ -2822,7 +2850,7 @@
       savedScene = "load-error";
       try {
         const backup = await projectStore.load(true);
-        if (backup) { savedScene = ""; restoreSceneFromItems(backup.solids, backup.joints); showToast(L("Projeto recuperado da cópia anterior.", "Project recovered from the previous copy.")); }
+        if (backup) { savedScene = ""; restoreSceneFromItems(backup.solids, backup.joints, backup.assemblyBases); showToast(L("Projeto recuperado da cópia anterior.", "Project recovered from the previous copy.")); }
         else showToast(L("Falha ao abrir projeto. O arquivo anterior foi preservado; use Recuperar.", "Unable to open project. Previous data was preserved; use Recover."));
       } catch { showToast(L("Falha na recuperação. Importe uma cópia JSON.", "Recovery failed. Import a JSON backup.")); }
     }

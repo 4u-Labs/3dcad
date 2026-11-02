@@ -43,7 +43,8 @@
         enabled: config.limits?.enabled !== false,
       };
 
-      this.value = Number(config.value ?? (this.type === "revolute" ? 0 : 0));
+      this.value = 0;
+      this.setValue(config.value ?? 0);
       this.initialValue = this.value;
     }
 
@@ -79,6 +80,8 @@
 
     registerBody(id, name, mesh) {
       if (!mesh) return;
+      const existing = this.bodies.get(id);
+      if (existing?.mesh === mesh) { existing.name = name || id; return; }
       this.bodies.set(id, {
         id,
         name: name || id,
@@ -92,6 +95,64 @@
     unregisterBody(id) {
       this.bodies.delete(id);
       this.joints = this.joints.filter((j) => j.bodyA !== id && j.bodyB !== id);
+    }
+
+    clear() {
+      this.joints = [];
+      this.bodies.clear();
+    }
+
+    serializeBases() {
+      return Object.fromEntries([...this.bodies].map(([id, body]) => [id, {
+        pos: body.basePos.toArray(),
+        quaternion: body.baseQuaternion.toArray(),
+        scale: body.baseScale.toArray(),
+      }]));
+    }
+
+    restoreBases(bases = {}) {
+      for (const [id, transform] of Object.entries(bases)) {
+        const body = this.bodies.get(id);
+        if (!body) continue;
+        body.basePos.fromArray(transform.pos);
+        body.baseQuaternion.fromArray(transform.quaternion);
+        body.baseScale.fromArray(transform.scale);
+      }
+    }
+
+    // Version 2 projects written before assemblyBases stored only the posed meshes.
+    // Recover the rest pose by inverting each joint along the saved kinematic chain.
+    inferBasesFromCurrentPose(list = []) {
+      if (typeof THREE === "undefined") return;
+      const current = new Map([...this.bodies].map(([id,b]) => [id,
+        new THREE.Matrix4().compose(b.mesh.position,b.mesh.quaternion,b.mesh.scale)]));
+      const jointsByChild = new Map(list.map(j => [j.bodyB,j]));
+      const bases = new Map(current);
+      const visiting = new Set(),done = new Set();
+      const solve = joint => {
+        if(done.has(joint.bodyB)||visiting.has(joint.bodyB))return;
+        visiting.add(joint.bodyB);
+        const parentJoint=jointsByChild.get(joint.bodyA);
+        if(parentJoint)solve(parentJoint);
+        const child=current.get(joint.bodyB), parent=current.get(joint.bodyA);
+        if(child && parent){
+          const axis=new THREE.Vector3(...(joint.axis||[0,0,1])).normalize();
+          const anchor=new THREE.Vector3(...(joint.anchor||[0,0,0]));
+          let motion=new THREE.Matrix4();
+          if(joint.type==="slider")motion.makeTranslation(...axis.multiplyScalar(Number(joint.value)||0).toArray());
+          else if(joint.type==="revolute"||joint.type==="ball"){
+            motion.makeTranslation(...anchor.toArray())
+              .multiply(new THREE.Matrix4().makeRotationAxis(axis,toRad(joint.value)))
+              .multiply(new THREE.Matrix4().makeTranslation(...anchor.negate().toArray()));
+          }
+          const base=(bases.get(joint.bodyA)||parent).clone().multiply(motion.invert()).multiply(parent.clone().invert()).multiply(child);
+          bases.set(joint.bodyB,base);
+          const record=this.bodies.get(joint.bodyB);
+          base.decompose(record.basePos,record.baseQuaternion,record.baseScale);
+        }
+        visiting.delete(joint.bodyB);done.add(joint.bodyB);
+      };
+      list.forEach(solve);
     }
 
     addJoint(config) {
