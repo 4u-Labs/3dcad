@@ -1,4 +1,4 @@
-# 3DCad Studio 1.4.0 — BRep analítico, modelagem por malhas e Assistente IA Local
+# 3DCad Studio 1.4.1 — BRep analítico, modelagem por malhas e Assistente IA Local
 
 [Português](#português) · [English](#english) · [Abrir / Open](https://4u.ia.br/app/3dcad/)
 

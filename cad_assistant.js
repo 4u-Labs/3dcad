@@ -38,6 +38,29 @@
 
   const KNOWLEDGE_BASE = [
     {
+      id: 'open_files_universal',
+      categories: ['files', 'import', 'export'],
+      keywords: ['abrir', 'importar', 'arquivo', 'open', 'import', 'stl', '3mf', 'step', 'stp', 'json', 'carregar', 'load', 'diferenca'],
+      titlePt: 'Como Abrir ou Importar Arquivos (STL, 3MF, STEP e JSON)',
+      titleEn: 'How to Open or Import Files (STL, 3MF, STEP and JSON)',
+      summaryPt: 'O botão "Abrir" é universal: ele aceita projetos nativos .JSON e modelos 3D nos formatos .STL, .3MF e .STEP.',
+      summaryEn: 'The "Open" button is universal: it accepts native .JSON projects and 3D models in .STL, .3MF, and .STEP formats.',
+      stepsPt: [
+        '• Botão Universal "Abrir": Clique em "Abrir" na barra superior (ou na fita de ferramentas, ou na lateral da Árvore de Peças).',
+        '• Se escolher um arquivo .JSON: O app abre o projeto completo com todas as peças, histórico de medidas e juntas de montagem.',
+        '• Se escolher .STL, .3MF ou .STEP: O app traz o modelo 3D diretamente para a mesa de impressão, somando à cena atual.',
+        '• Arrastar e Soltar: Você também pode simplesmente arrastar qualquer arquivo .STL, .3MF, .STEP ou .JSON do seu computador para dentro da tela do navegador!'
+      ],
+      stepsEn: [
+        '• Universal "Open" Button: Click "Open" on the top bar (or ribbon, or sidebar project tree).',
+        '• Choosing a .JSON file: The app opens the complete project restoring all parts, dimensions, and kinematic joints.',
+        '• Choosing .STL, .3MF, or .STEP: The app inserts the 3D model directly onto the build plate, alongside existing parts.',
+        '• Drag & Drop: You can also simply drag and drop any .STL, .3MF, .STEP, or .JSON file directly onto the browser window!'
+      ],
+      tipPt: 'Arquivos grandes de até 150 MB são suportados com decimação automática suave para malhas acima de 1 milhão de polígonos.',
+      tipEn: 'Large files up to 150 MB are supported with automatic non-blocking decimation for meshes over 1,000,000 triangles.'
+    },
+    {
       id: 'csg_boolean_drill',
       categories: ['csg', 'modeling'],
       keywords: ['furar', 'furo', 'buraco', 'subtrair', 'unir', 'intersecao', 'booleana', 'csg', 'drill', 'hole', 'subtract', 'union', 'intersect'],
